@@ -65,20 +65,20 @@ pip install "siftq[mem]"       # adds psutil for smarter RAM sizing
 
 ## Troubleshooting
 
-**`dq: command not found` / `'dq' is not recognized`?**
-`pip` installed the `dq` launcher into a scripts folder that isn't on your PATH -
-a common Python-on-Windows thing, not specific to siftq. Fixes, easiest first:
+**`'dq' is not recognized` / `dq: command not found`?**
+`pip` installed siftq correctly (including the `dq` command) - it just landed in a
+folder that isn't on your system PATH, so the terminal can't find it. This affects
+every pip-installed command-line tool, not just siftq. Options:
 
-- Install with **[pipx](https://pipx.pypa.io)**, which puts CLI tools on your PATH automatically:
-  ```bash
-  pipx install siftq
-  ```
-- Or run it as a module (works without PATH):
+- **Use it right now, no setup** - run it as a module:
   ```bash
   python -m sift --help
   ```
-- Or add the scripts folder shown in `pip`'s install warning to your PATH
-  (on Windows you can also reinstall Python with "Add Python to PATH" ticked).
+- **Fix it for good** - put Python's scripts folder on PATH. Simplest: (re)install
+  Python from [python.org](https://www.python.org/downloads/) and tick
+  **"Add python.exe to PATH"**. After that, `pip`-installed commands like `dq` just work.
+- Prefer an isolated install? Use [pipx](https://pipx.pypa.io) via
+  `python -m pipx install siftq` (it manages PATH for you).
 
 ## Roadmap
 
