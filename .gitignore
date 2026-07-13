@@ -1,0 +1,14 @@
+# build / packaging artifacts
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# local envs
+.venv/
+venv/
+
+# example outputs
+examples/out/
+examples/*_out.csv
