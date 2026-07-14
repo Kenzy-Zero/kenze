@@ -12,3 +12,6 @@ venv/
 # example outputs
 examples/out/
 examples/*_out.csv
+
+# local notes (not for the public repo)
+PROJECT_NOTES.md
