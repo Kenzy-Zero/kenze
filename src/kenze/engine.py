@@ -118,6 +118,18 @@ def ensure_remote(con, *paths):
         pass
 
 
+def load_extension(con, name: str):
+    """Install + load a DuckDB extension on demand (e.g. delta, iceberg)."""
+    for stmt in (f"INSTALL {name}", f"LOAD {name}"):
+        try:
+            con.execute(stmt)
+        except duckdb.Error as e:
+            raise ValueError(
+                f"could not load the '{name}' DuckDB extension "
+                f"(needs internet on first use): {e}"
+            ) from e
+
+
 def temp_dir_of(con) -> str:
     try:
         td = con.execute("SELECT current_setting('temp_directory')").fetchone()[0]

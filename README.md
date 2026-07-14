@@ -115,17 +115,31 @@ kenze.profile("big.parquet")
 
 ## Handy flags
 
-- `--memory-limit 8` — pin the RAM budget (GB) for reproducible / SLA runs.
+- `--dry-run` — show the compiled query + output schema *without* running it.
+- `--errors bad.csv` — quarantine malformed CSV rows to a file (with line/column diagnostics) and keep going.
+- `--append` — add to an existing csv/json output instead of overwriting.
+- `--source-format delta|iceberg` — read a Delta Lake or Apache Iceberg table.
+- `--memory-limit 8` — pin the RAM budget (GB) for reproducible / SLA runs (great for shared CI/Airflow nodes).
 - `--temp-dir D:/spill` — put disk-spill where there's room.
 - `--skip-bad-lines` — ignore malformed rows in a dirty CSV.
 - `--log run.json` — write a run manifest (inputs, rows, timing).
 - Writes are **atomic** — a cancelled run never leaves a half-written file.
 
+## Hand off to a dataframe
+
+Clean a huge file, then pass the result straight to Polars / Arrow / pandas — no disk round-trip:
+
+```python
+import kenze
+df = kenze.to_polars("SELECT * FROM 'big.parquet' WHERE amount > 0")   # pip install kenze[polars]
+tbl = kenze.to_arrow("SELECT city, count(*) FROM 'big.parquet' GROUP BY 1")   # kenze[arrow]
+```
+
 ## Commands
 
 `profile` · `peek` · `stats` · `check` · `validate` · `keep` · `drop` · `rename` · `cast` ·
 `fillna` · `mask` · `filter` · `dedup` · `sample` · `head` · `clip` · `convert` · `join` ·
-`diff` · `pivot` · `split` · `partition` · `sql` · `eject` · `run` · `recipe`
+`diff` · `pivot` · `split` · `partition` · `sql` · `eject` · `init` · `run` · `recipe`
 
 ## Where it stops (on purpose)
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kenze"
-version = "0.3.1"
+version = "0.4.0"
 description = "Big-file data prep that never runs out of memory - no SQL required. Powered by DuckDB."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -34,7 +34,11 @@ classifiers = [
 dependencies = ["duckdb>=0.10", "psutil>=5.9"]
 
 [project.optional-dependencies]
-cloud = ["duckdb>=0.10"]   # S3/GCS/Azure work out of the box via DuckDB httpfs
+# hand cleaned data straight to a fast in-memory dataframe (kenze.to_polars / to_arrow / to_df)
+polars = ["polars>=0.20"]
+arrow = ["pyarrow>=14"]
+pandas = ["pandas>=1.5"]
+all = ["polars>=0.20", "pyarrow>=14", "pandas>=1.5"]
 
 [project.urls]
 Homepage = "https://github.com/Kenzy-Zero/kenze"

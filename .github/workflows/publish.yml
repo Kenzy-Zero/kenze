@@ -1,0 +1,27 @@
+name: Publish to PyPI
+
+# Publishes to PyPI when a GitHub Release is published, using Trusted
+# Publishing (OIDC) - no API token needed. Configure the trusted publisher once
+# at https://pypi.org/manage/project/kenze/settings/publishing/ :
+#   owner: Kenzy-Zero   repo: kenze   workflow: publish.yml   (environment: blank)
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # required for Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build distributions
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

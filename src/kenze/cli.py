@@ -14,6 +14,7 @@ from .ops import (
     check,
     diff,
     eject,
+    init,
     join,
     partition,
     peek,
@@ -33,6 +34,7 @@ from .recipe import parse as parse_recipe
 _GLOBAL_DEFAULTS = {
     "memory_limit": None, "temp_dir": None, "no_disk_check": False,
     "skip_bad_lines": False, "log": None, "quiet": False,
+    "dry_run": False, "errors": None, "append": False, "source_format": None,
 }
 
 
@@ -46,6 +48,14 @@ def _add_globals(parser):
                    help="skip the pre-flight free-space check")
     g.add_argument("--skip-bad-lines", action="store_true", default=s,
                    help="ignore malformed rows in CSV input")
+    g.add_argument("--errors", metavar="PATH", default=s,
+                   help="quarantine malformed CSV rows to this file instead of failing")
+    g.add_argument("--append", action="store_true", default=s,
+                   help="append to the output file instead of overwriting (csv/json)")
+    g.add_argument("--source-format", metavar="FMT", default=s,
+                   help="read a lakehouse table: delta | iceberg")
+    g.add_argument("--dry-run", action="store_true", default=s,
+                   help="show the compiled query + output schema without running it")
     g.add_argument("--log", metavar="PATH", default=s,
                    help="write a run manifest (json) after a transform")
     g.add_argument("-q", "--quiet", action="store_true", default=s,
@@ -164,6 +174,10 @@ def build_parser():
     sp.add_argument("--set", action="append", default=[], metavar="K=V",
                     dest="variables", help="set a recipe variable (repeatable)")
 
+    sp = cmd("init", help="write a starter .dq recipe (scaffolding)")
+    sp.add_argument("path", nargs="?", default="recipe.dq")
+    sp.add_argument("--input", dest="init_input", help="a data file to pre-fill columns from")
+
     cmd("recipe", help="show the recipe (.dq) format and every valid step")
     return p
 
@@ -176,12 +190,25 @@ def _con(a):
     )
 
 
-def _run(a, spec):
+def _spec_globals(a, spec):
     spec.setdefault("skip_bad_lines", a.skip_bad_lines)
+    if a.errors:
+        spec["errors"] = a.errors
+    if a.append:
+        spec["append"] = True
+    if a.source_format:
+        spec["source_format"] = a.source_format
+    return spec
+
+
+def _run(a, spec):
+    _spec_globals(a, spec)
     con = _con(a)
     try:
-        print(f"-> {a.cmd}")
-        run_spec(spec, con=con, quiet=a.quiet, disk_check=not a.no_disk_check, log=a.log)
+        if not a.dry_run:
+            print(f"-> {a.cmd}")
+        run_spec(spec, con=con, quiet=a.quiet, disk_check=not a.no_disk_check,
+                 log=a.log, dry_run=a.dry_run)
     finally:
         con.close()
 
@@ -191,16 +218,18 @@ def _inspect(a):
     if a.cmd == "recipe":
         print(REFERENCE)
     elif a.cmd == "profile":
-        profile(a.input)
+        profile(a.input, fmt=a.source_format)
     elif a.cmd == "peek":
-        peek(a.input, n=a.n)
+        peek(a.input, n=a.n, fmt=a.source_format)
     elif a.cmd == "stats":
-        stats(a.input)
+        stats(a.input, fmt=a.source_format)
     elif a.cmd == "check":
         check(a.input)
     elif a.cmd == "validate":
         if validate(a.input, a.schema):
             sys.exit(1)
+    elif a.cmd == "init":
+        init(a.path, input_path=a.init_input)
     else:
         return False
     return True
@@ -236,11 +265,13 @@ def _combine(a):
         variables = dict(kv.split("=", 1) for kv in a.variables if "=" in kv)
         with open(a.recipe, "r", encoding="utf-8") as f:
             spec = parse_recipe(f.read(), variables=variables)
-        spec.setdefault("skip_bad_lines", a.skip_bad_lines)
+        _spec_globals(a, spec)
         con = _con(a)
         try:
-            print(f"-> running recipe {a.recipe}")
-            run_spec(spec, con=con, quiet=a.quiet, disk_check=not a.no_disk_check, log=a.log)
+            if not a.dry_run:
+                print(f"-> running recipe {a.recipe}")
+            run_spec(spec, con=con, quiet=a.quiet, disk_check=not a.no_disk_check,
+                     log=a.log, dry_run=a.dry_run)
         finally:
             con.close()
     else:

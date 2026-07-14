@@ -2,7 +2,7 @@
 
 Big-file data preparation that never runs out of memory. No SQL required.
 
-Version 0.3.1
+Version 0.4.0
 
 ---
 
@@ -540,6 +540,15 @@ kenze run clean.dq --set DAY=2026-07-14
 Options:
 - `--set KEY=VALUE` — provide a value for a recipe variable; may be repeated.
 
+#### init
+
+Scaffold a starter recipe file. With `--input`, it reads the file's columns and
+pre-fills them so you only have to delete what you don't want.
+
+```
+kenze init clean.dq --input sales.csv
+```
+
 #### recipe
 
 Print the recipe file format and every valid step, as a built-in cheat sheet.
@@ -651,8 +660,23 @@ commands and the recipe steps: `keep`, `drop`, `filter`, `bbox`, `types`,
 `fillna`, `mask`, `rename`, `dedup`, `sample`, and `head`.
 
 Other functions available on the `kenze` module include `join`, `diff`, `split`,
-`partition`, `pivot`, `peek`, `check`, `validate`, and `connect` (which returns a
-pre-configured DuckDB connection if you want to work with DuckDB directly).
+`partition`, `pivot`, `peek`, `check`, `validate`, `init`, and `connect` (which
+returns a pre-configured DuckDB connection if you want to work with DuckDB directly).
+
+### Hand off to a dataframe
+
+Clean a file larger than memory, then pass the cleaned result straight to a fast
+in-memory dataframe without a disk round-trip:
+
+```python
+import kenze
+frame = kenze.to_polars("SELECT * FROM 'big.parquet' WHERE amount > 0")
+table = kenze.to_arrow("SELECT city, count(*) FROM 'big.parquet' GROUP BY 1")
+df    = kenze.to_df("SELECT * FROM 'big.parquet' LIMIT 1000")
+```
+
+These need the corresponding library, available as extras:
+`pip install kenze[polars]`, `kenze[arrow]`, `kenze[pandas]`, or `kenze[all]`.
 
 ---
 
@@ -703,6 +727,10 @@ command name.
 | `--temp-dir DIR` | Use a specific directory for disk-spill. Point this at a drive with plenty of free space when processing very large files. |
 | `--no-disk-check` | Skip the pre-flight free-space check. |
 | `--skip-bad-lines` | Ignore malformed rows in CSV input rather than stopping on them. |
+| `--errors PATH` | Quarantine malformed CSV rows to a file (with line/column diagnostics) and keep processing the good rows. |
+| `--append` | Append to an existing csv/json output instead of overwriting it. |
+| `--source-format FMT` | Read a lakehouse table: `delta` or `iceberg` (the extension is loaded on demand; needs internet the first time). |
+| `--dry-run` | Print the compiled query and the output schema without executing anything. Useful before a large or expensive run. |
 | `--log PATH` | After a transform, write a JSON run manifest recording the inputs, output, row count, timing, and steps. |
 | `-q`, `--quiet` | Suppress the summary line printed after a transform. |
 | `--version` | Print the version and exit. |
@@ -819,7 +847,7 @@ kenze follows semantic versioning. The core stays small and grows one release at
 a time. Each release is built, checked, published to PyPI, and verified with a
 clean-environment install before being considered done.
 
-The current release is 0.3.1.
+The current release is 0.4.0.
 
 ---
 

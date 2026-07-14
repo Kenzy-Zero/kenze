@@ -15,7 +15,7 @@ import sys
 import tempfile
 import time
 
-from .engine import connect, ensure_remote, is_remote, sql_path, temp_dir_of
+from .engine import connect, ensure_remote, is_remote, load_extension, sql_path, temp_dir_of
 
 LAT_NAMES = {"lat", "latitude"}
 LON_NAMES = {"lon", "lng", "long", "longitude"}
@@ -25,15 +25,27 @@ def _ident(c: str) -> str:
     return '"' + str(c).replace('"', '""') + '"'
 
 
-def _source(path: str, skip_bad: bool = False) -> str:
+REJECTS_TABLE = "kenze_rejects"
+
+
+def _source(path: str, skip_bad: bool = False, fmt: str = None, errors: bool = False) -> str:
     """A FROM-able source for a path.
 
-    DuckDB auto-detects csv / parquet / json (and .gz) by extension. When
-    skip_bad is set we read CSVs through read_csv with ignore_errors so a few
-    malformed lines don't kill the whole pass.
+    DuckDB auto-detects csv / parquet / json (and .gz) by extension. A `fmt` of
+    'delta' or 'iceberg' reads a lakehouse table (extension loaded by the caller).
+    `skip_bad` ignores malformed CSV rows; `errors` also quarantines them so the
+    caller can write them out.
     """
     p = "'" + sql_path(path) + "'"
-    if skip_bad and _ext(path) in ("", ".csv", ".tsv", ".txt", ".gz"):
+    if fmt in ("delta", "deltalake"):
+        return f"delta_scan({p})"
+    if fmt == "iceberg":
+        return f"iceberg_scan({p})"
+    is_csvish = _ext(path) in ("", ".csv", ".tsv", ".txt", ".gz")
+    if errors and is_csvish:
+        return (f"read_csv({p}, ignore_errors=true, store_rejects=true, "
+                f"rejects_table='{REJECTS_TABLE}', auto_detect=true)")
+    if skip_bad and is_csvish:
         return f"read_csv({p}, ignore_errors=true, auto_detect=true)"
     return p
 
@@ -108,7 +120,8 @@ def _wrap_replace(q: str, items):
 
 
 def build_query(con, spec) -> str:
-    src = _source(spec["input"], skip_bad=spec.get("skip_bad_lines"))
+    src = _source(spec["input"], skip_bad=spec.get("skip_bad_lines"),
+                  fmt=spec.get("source_format"), errors=bool(spec.get("errors")))
     cols = columns(con, src)
 
     # base projection
@@ -293,14 +306,75 @@ def _write_log(path, payload):
         pass
 
 
+def _load_source_ext(con, fmt):
+    if fmt in ("delta", "deltalake"):
+        load_extension(con, "delta")
+    elif fmt == "iceberg":
+        load_extension(con, "iceberg")
+
+
+def _explain(con, q, out):
+    """--dry-run: show what WOULD run (compiled query + output schema), no execution."""
+    print("\n  DRY RUN - nothing was executed.")
+    print(f"  would write to: {out}\n")
+    print("  compiled query:")
+    print(f"    {q}\n")
+    try:
+        schema = con.execute(f"DESCRIBE {q}").fetchall()
+        print("  output schema:")
+        for row in schema:
+            print(f"    {row[0]:<24} {row[1]}")
+        print()
+    except Exception:
+        pass
+
+
+def _dump_rejects(con, errpath):
+    """Write the quarantined bad CSV rows to errpath; return how many."""
+    try:
+        n = con.execute(f"SELECT count(*) FROM {REJECTS_TABLE}").fetchone()[0]
+    except Exception:
+        return 0
+    if not n:
+        return 0
+    os.makedirs(os.path.dirname(os.path.abspath(errpath)) or ".", exist_ok=True)
+    con.execute(
+        f"COPY (SELECT * FROM {REJECTS_TABLE}) TO '{sql_path(errpath)}' {_copy_opts(errpath)}"
+    )
+    return n
+
+
+def _copy_append(con, query, out, copy_opts):
+    """Append rows to an existing csv/tsv/json file (create it if missing)."""
+    if _ext(out) in (".parquet", ".pq") or out.lower().endswith(".gz"):
+        raise ValueError("append is only supported for plain csv/tsv/json outputs")
+    if not os.path.exists(out) or os.path.getsize(out) == 0:
+        return _copy(con, query, out, copy_opts)
+    tmp = out + f".kenze-app-{os.getpid()}"
+    try:
+        n = _copy_to(con, query, tmp, copy_opts)
+        n = n if n is not None else _count_file(con, tmp)
+        strip_header = _ext(out) in ("", ".csv", ".tsv", ".txt")
+        with open(tmp, "rb") as f:
+            if strip_header:
+                f.readline()  # drop the new chunk's header row
+            data = f.read()
+        with open(out, "ab") as g:
+            g.write(data)
+        return n
+    finally:
+        _rm(tmp)
+
+
 # ------------------------------------------------------------------ core run
 
-def run_spec(spec, con=None, quiet=False, disk_check=True, log=None) -> int:
+def run_spec(spec, con=None, quiet=False, disk_check=True, log=None, dry_run=False) -> int:
     own = con is None
     con = con or connect(progress=(not quiet) and _tty())
     stdin_tmp = None
     try:
         ensure_remote(con, spec.get("input"), spec.get("output"))
+        _load_source_ext(con, spec.get("source_format"))
         if spec.get("input") == "-":
             stdin_tmp = _spool_stdin(temp_dir_of(con), spec.get("stdin_format", "csv"))
             spec = {**spec, "input": stdin_tmp}
@@ -308,15 +382,26 @@ def run_spec(spec, con=None, quiet=False, disk_check=True, log=None) -> int:
         t0 = time.time()
         q = build_query(con, spec)
         out = spec["output"]
+        if dry_run:
+            _explain(con, q, out)
+            return 0
+
         _disk_check(con, [spec["input"]], out, skip=not disk_check)
-        n = _copy(con, q, out, _copy_opts(out if out != "-" else "out.csv"))
+        opts = _copy_opts(out if out != "-" else "out.csv")
+        if spec.get("append") and out != "-" and not is_remote(out):
+            n = _copy_append(con, q, out, opts)
+        else:
+            n = _copy(con, q, out, opts)
+
+        nbad = _dump_rejects(con, spec["errors"]) if spec.get("errors") and out != "-" else 0
         secs = time.time() - t0
         if not quiet and out != "-":
-            print(f"  done: {n:,} rows -> {out}  ({secs:,.1f}s)")
+            extra = f"  ({nbad:,} bad rows -> {spec['errors']})" if nbad else ""
+            print(f"  done: {n:,} rows -> {out}  ({secs:,.1f}s){extra}")
         if log:
             _write_log(log, {
                 "tool": "kenze", "action": "run", "input": spec.get("input"),
-                "output": out, "rows": n, "seconds": round(secs, 3),
+                "output": out, "rows": n, "bad_rows": nbad, "seconds": round(secs, 3),
                 "steps": {k: spec[k] for k in spec if k not in ("input", "output")},
                 "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             })
@@ -337,15 +422,16 @@ def _tty():
 
 # --------------------------------------------------------------- inspect ops
 
-def profile(path, con=None) -> int:
+def profile(path, con=None, fmt=None) -> int:
     own = con is None
     con = con or connect()
     try:
         ensure_remote(con, path)
-        src = _source(path)
+        _load_source_ext(con, fmt)
+        src = _source(path, fmt=fmt)
         schema = con.execute(f"DESCRIBE SELECT * FROM {src}").fetchall()
         n = con.execute(f"SELECT count(*) FROM {src}").fetchone()[0]
-        size = os.path.getsize(path) if (not is_remote(path) and os.path.exists(path)) else 0
+        size = os.path.getsize(path) if (not is_remote(path) and os.path.isfile(path)) else 0
         print(f"\n  {os.path.basename(path)}")
         print(f"  {n:,} rows  |  {len(schema)} columns  |  {size / 1e9:,.2f} GB on disk\n")
         for row in schema:
@@ -357,13 +443,14 @@ def profile(path, con=None) -> int:
             con.close()
 
 
-def stats(path, con=None):
+def stats(path, con=None, fmt=None):
     """Per-column summary (min/max/nulls/approx-unique) via DuckDB SUMMARIZE."""
     own = con is None
     con = con or connect()
     try:
         ensure_remote(con, path)
-        src = _source(path)
+        _load_source_ext(con, fmt)
+        src = _source(path, fmt=fmt)
         rows = con.execute(f"SUMMARIZE SELECT * FROM {src}").fetchall()
         cols = [d[0] for d in con.description]
         show = [c for c in ("column_name", "column_type", "min", "max", "approx_unique", "null_percentage") if c in cols]
@@ -385,14 +472,15 @@ def _s(v):
     return "" if v is None else str(v)
 
 
-def peek(path, n=20, con=None):
+def peek(path, n=20, con=None, fmt=None):
     """A quick, zero-dependency look: first N rows as an aligned table,
     plus each column's type and null count (over the sample)."""
     own = con is None
     con = con or connect()
     try:
         ensure_remote(con, path)
-        src = _source(path)
+        _load_source_ext(con, fmt)
+        src = _source(path, fmt=fmt)
         schema = con.execute(f"DESCRIBE SELECT * FROM {src}").fetchall()
         names = [r[0] for r in schema]
         types = {r[0]: r[1] for r in schema}
@@ -725,3 +813,76 @@ def split(input_path, by, out_dir, fmt="csv", con=None, max_groups=2000):
     finally:
         if own:
             con.close()
+
+
+# ---------------------------------------------------------- scaffolding / API
+
+def init(path="recipe.dq", input_path=None, con=None):
+    """Write a starter .dq recipe. If input_path is given, its columns are read
+    and pre-filled so you can just delete what you don't want."""
+    if os.path.exists(path):
+        raise ValueError(f"{path} already exists (refusing to overwrite)")
+    inp = input_path or "data/input.csv"
+    lines = [
+        "# kenze recipe - edit the steps you want, delete the rest.",
+        "# every step is the same word as a `kenze` command (see: kenze recipe)",
+        "",
+        f"input:  {inp}",
+    ]
+    if input_path:
+        own = con is None
+        con = con or connect()
+        try:
+            ensure_remote(con, input_path)
+            cols = columns(con, _source(input_path))
+        finally:
+            if own:
+                con.close()
+        lines.append(f"# columns in {os.path.basename(input_path)}: {', '.join(cols)}")
+        lines.append(f"keep:   [{', '.join(cols[:4])}]")
+    else:
+        lines.append("keep:   [col_a, col_b]")
+    stem = os.path.splitext(os.path.basename(inp))[0]
+    lines += [
+        "# filter: amount > 0",
+        "# types:  zip:VARCHAR",
+        "# fillna: city:Unknown",
+        "# dedup:  id",
+        "# sample: 50000",
+        f"output: {stem}_clean.csv",
+        "",
+    ]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"  wrote starter recipe -> {path}\n  edit it, then run:  kenze run {path}")
+    return path
+
+
+def _frame(query, kind, con=None):
+    own = con is None
+    con = con or connect()
+    try:
+        rel = con.execute(query)
+        if kind == "arrow":
+            return rel.fetch_arrow_table()
+        if kind == "polars":
+            return rel.pl()
+        return rel.df()
+    finally:
+        if own:
+            con.close()
+
+
+def to_arrow(query, con=None):
+    """Run SQL and return the result as a pyarrow Table (needs `pip install kenze[arrow]`)."""
+    return _frame(query, "arrow", con)
+
+
+def to_polars(query, con=None):
+    """Run SQL and return the result as a Polars DataFrame (needs `pip install kenze[polars]`)."""
+    return _frame(query, "polars", con)
+
+
+def to_df(query, con=None):
+    """Run SQL and return the result as a pandas DataFrame (needs pandas)."""
+    return _frame(query, "df", con)

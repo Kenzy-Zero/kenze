@@ -51,6 +51,19 @@ below marked [x] are built + tested (synthetic data + the real 54.6M-row / 2.5GB
 - [x] **`peek`** — zero-dep preview (rows + types + null counts). *Scrollable Textual TUI = a future
       optional `[tui]` extra by choice, to keep core one-dependency.*
 
+## Feedback round 2 (2026-07-14) -> SHIPPED in kenze 0.4.0
+External review triaged take / throw / thank. Built the "take" + "take-later" items:
+- [x] **Polars / Arrow / pandas bridges** — `kenze.to_polars() / to_arrow() / to_df()` (optional extras `[polars]/[arrow]/[pandas]/[all]`).
+- [x] **`--dry-run`** — print compiled query + output schema, no execution.
+- [x] **`--errors PATH`** — quarantine malformed CSV rows (line/column diagnostics), good rows keep flowing.
+- [x] **`kenze init`** — scaffold a starter recipe, pre-filled from a file's columns (defuses "DSL friction").
+- [x] **`--append`** — append to existing csv/json output.
+- [x] **Delta Lake / Iceberg read** — `--source-format delta|iceberg` (proven on a real Delta table).
+- [x] **Trusted Publishing workflow** — `.github/workflows/publish.yml` (tokenless signed releases; Ken configures the PyPI trusted publisher once).
+- [thank] `--memory-limit` already answers the "shared-node memory pitfall"; `eject` already answers "no lock-in / graduation path"; the "Medium Data" (Pandas -> kenze -> PySpark) positioning is a marketing gift.
+- [throw] DuckDB-CLI overlap (marketing, not code) · one-man-maintenance risk (not codeable) · recipe-DSL fear (recipes are optional) · visual DAG (scope-creep) · cluster/horizontal-scale (by design).
+- [later-heavy] full Delta/Iceberg **upsert/write** + real state management = only if demand shows; NOT in lean core.
+
 ## 🚀 BIG BETS (own track, later)
 - [ ] **single binary** (PyInstaller / `curl | sh`) — slips past "pip is blocked on prod servers"
 - [ ] **WASM browser playground** (drag file → live recipe, 100% local) — best viral growth loop
