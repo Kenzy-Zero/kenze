@@ -32,10 +32,11 @@ from .ops import (
     to_arrow,
     to_df,
     to_polars,
+    unpivot,
     validate,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 
 def sift(input, output, con=None, quiet=True, **steps):
@@ -69,7 +70,7 @@ __all__ = [
     "connect", "sift", "run", "sql", "init",
     "run_spec", "build_query", "run_sql",
     "profile", "stats", "peek", "check", "validate",
-    "join", "diff", "split", "partition", "pivot",
+    "join", "diff", "split", "partition", "pivot", "unpivot",
     "to_arrow", "to_polars", "to_df",
     "__version__",
 ]

@@ -2,7 +2,7 @@
 
 Big-file data preparation that never runs out of memory. No SQL required.
 
-Version 0.4.0
+Version 0.5.0
 
 ---
 
@@ -456,6 +456,20 @@ Options:
 - `--agg sum|count|avg|min|max|median` — the aggregation (default sum).
 - `--group cols` — the row-identity columns to retain (optional).
 
+#### unpivot
+
+The complement of `pivot`: reshape wide to long by folding several columns into a
+name column and a value column (a "melt"). Columns you don't fold are kept.
+
+```
+kenze unpivot wide.csv --cols jan,feb,mar --name month --value sales -o long.csv
+```
+
+Options:
+- `--cols cols` — the columns to fold.
+- `--name NAME` — the new name column (default `name`).
+- `--value NAME` — the new value column (default `value`).
+
 ### 6.5 Splitting and partitioning
 
 #### split
@@ -604,7 +618,14 @@ output: out/clean.csv
 | `dedup` | Drop duplicates by a key column, or `all`. |
 | `sample` | Keep N random rows. |
 | `head` | Keep the first N rows. |
+| `assert` | Fail the run unless a condition on `row_count` holds, e.g. `row_count > 0`. |
+| `assert_unique` | Fail if the listed column(s) contain duplicates. |
+| `assert_not_null` | Fail if the listed columns contain nulls. |
 | `output` | Destination file (required). |
+
+Assertions run *before* anything is written, so a failed check aborts the run with
+no output. You can list several `assert` / `assert_unique` / `assert_not_null` lines
+to build data-quality tests directly into a recipe.
 
 Every step name is identical to the corresponding command name. Learning the
 commands teaches the recipe format at the same time.
@@ -725,6 +746,7 @@ command name.
 | --- | --- |
 | `--memory-limit GB` | Pin the memory budget to a fixed number of gigabytes, for reproducible runs, instead of auto-sizing from free RAM. |
 | `--temp-dir DIR` | Use a specific directory for disk-spill. Point this at a drive with plenty of free space when processing very large files. |
+| `--threads N` | Cap the number of CPU threads DuckDB uses (default: all cores). |
 | `--no-disk-check` | Skip the pre-flight free-space check. |
 | `--skip-bad-lines` | Ignore malformed rows in CSV input rather than stopping on them. |
 | `--errors PATH` | Quarantine malformed CSV rows to a file (with line/column diagnostics) and keep processing the good rows. |
@@ -847,7 +869,7 @@ kenze follows semantic versioning. The core stays small and grows one release at
 a time. Each release is built, checked, published to PyPI, and verified with a
 clean-environment install before being considered done.
 
-The current release is 0.4.0.
+The current release is 0.5.0.
 
 ---
 

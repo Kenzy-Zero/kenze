@@ -28,25 +28,42 @@ def _ident(c: str) -> str:
 REJECTS_TABLE = "kenze_rejects"
 
 
+def _is_glob(path) -> bool:
+    return isinstance(path, str) and any(c in path for c in "*?[")
+
+
 def _source(path: str, skip_bad: bool = False, fmt: str = None, errors: bool = False) -> str:
     """A FROM-able source for a path.
 
     DuckDB auto-detects csv / parquet / json (and .gz) by extension. A `fmt` of
     'delta' or 'iceberg' reads a lakehouse table (extension loaded by the caller).
-    `skip_bad` ignores malformed CSV rows; `errors` also quarantines them so the
-    caller can write them out.
+    `skip_bad` ignores malformed CSV rows; `errors` also quarantines them. When
+    the path is a glob (sales_*.csv), union_by_name aligns columns across files
+    so a schema mismatch between files doesn't crash the run.
     """
     p = "'" + sql_path(path) + "'"
     if fmt in ("delta", "deltalake"):
         return f"delta_scan({p})"
     if fmt == "iceberg":
         return f"iceberg_scan({p})"
-    is_csvish = _ext(path) in ("", ".csv", ".tsv", ".txt", ".gz")
-    if errors and is_csvish:
-        return (f"read_csv({p}, ignore_errors=true, store_rejects=true, "
-                f"rejects_table='{REJECTS_TABLE}', auto_detect=true)")
-    if skip_bad and is_csvish:
-        return f"read_csv({p}, ignore_errors=true, auto_detect=true)"
+
+    glob = _is_glob(path)
+    e = _ext(path)
+    is_csvish = e in ("", ".csv", ".tsv", ".txt", ".gz")
+
+    if is_csvish and (errors or skip_bad or glob):
+        opts = ["auto_detect=true"]
+        if glob:
+            opts.append("union_by_name=true")
+        if errors:
+            opts += ["ignore_errors=true", "store_rejects=true", f"rejects_table='{REJECTS_TABLE}'"]
+        elif skip_bad:
+            opts.append("ignore_errors=true")
+        return f"read_csv({p}, {', '.join(opts)})"
+    if glob and e in (".parquet", ".pq"):
+        return f"read_parquet({p}, union_by_name=true)"
+    if glob and e in (".json", ".ndjson"):
+        return f"read_json({p}, union_by_name=true)"
     return p
 
 
@@ -366,6 +383,46 @@ def _copy_append(con, query, out, copy_opts):
         _rm(tmp)
 
 
+def _as_multi(v):
+    if v is None:
+        return []
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    return [v]
+
+
+def _run_asserts(con, q, spec):
+    """Fail (raise) if any recipe assertion doesn't hold. Runs BEFORE the write,
+    so a failed check aborts with no output."""
+    for cond in _as_multi(spec.get("assert")):
+        cond = cond if isinstance(cond, str) else " ".join(map(str, cond))
+        ok = con.execute(
+            f"SELECT ({cond}) FROM (SELECT count(*) AS row_count FROM ({q}) _q) _a"
+        ).fetchone()[0]
+        if not ok:
+            raise ValueError(f"assertion failed: {cond}")
+    for item in _as_multi(spec.get("assert_unique")):
+        cols = _aslist(item)
+        cl = ", ".join(_ident(c) for c in cols)
+        dups = con.execute(
+            f"SELECT count(*) FROM (SELECT {cl} FROM ({q}) _q GROUP BY {cl} HAVING count(*) > 1) _d"
+        ).fetchone()[0]
+        if dups:
+            raise ValueError(f"assert_unique failed: {dups:,} duplicate key(s) in ({', '.join(cols)})")
+    for item in _as_multi(spec.get("assert_not_null")):
+        for c in _aslist(item):
+            nn = con.execute(f"SELECT count(*) FROM ({q}) _q WHERE {_ident(c)} IS NULL").fetchone()[0]
+            if nn:
+                raise ValueError(f"assert_not_null failed: {nn:,} null(s) in column {c}")
+
+
+def _schema_of(con, sql):
+    try:
+        return {r[0]: r[1] for r in con.execute(f"DESCRIBE {sql}").fetchall()}
+    except Exception:
+        return None
+
+
 # ------------------------------------------------------------------ core run
 
 def run_spec(spec, con=None, quiet=False, disk_check=True, log=None, dry_run=False) -> int:
@@ -386,6 +443,7 @@ def run_spec(spec, con=None, quiet=False, disk_check=True, log=None, dry_run=Fal
             _explain(con, q, out)
             return 0
 
+        _run_asserts(con, q, spec)   # fail before writing anything
         _disk_check(con, [spec["input"]], out, skip=not disk_check)
         opts = _copy_opts(out if out != "-" else "out.csv")
         if spec.get("append") and out != "-" and not is_remote(out):
@@ -399,10 +457,14 @@ def run_spec(spec, con=None, quiet=False, disk_check=True, log=None, dry_run=Fal
             extra = f"  ({nbad:,} bad rows -> {spec['errors']})" if nbad else ""
             print(f"  done: {n:,} rows -> {out}  ({secs:,.1f}s){extra}")
         if log:
+            in_src = _source(spec["input"], skip_bad=spec.get("skip_bad_lines"),
+                             fmt=spec.get("source_format"), errors=bool(spec.get("errors")))
             _write_log(log, {
                 "tool": "kenze", "action": "run", "input": spec.get("input"),
                 "output": out, "rows": n, "bad_rows": nbad, "seconds": round(secs, 3),
                 "steps": {k: spec[k] for k in spec if k not in ("input", "output")},
+                "input_schema": _schema_of(con, f"SELECT * FROM {in_src}"),
+                "output_schema": _schema_of(con, q),
                 "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             })
         return n
@@ -705,6 +767,30 @@ def pivot(input_path, on, values, agg="sum", group=None, out=None, con=None,
         if group:
             pv += " GROUP BY " + ", ".join(_ident(c) for c in _aslist(group))
         q = f"SELECT * FROM ({pv})"   # wrap so it can be COPY'd
+        t0 = time.time()
+        _disk_check(con, [input_path], out, skip=not disk_check)
+        n = _copy(con, q, out, _copy_opts(out if out != "-" else "out.csv"))
+        if not quiet and out != "-":
+            print(f"  done: {n:,} rows -> {out}  ({time.time() - t0:,.1f}s)")
+        return n
+    finally:
+        if own:
+            con.close()
+
+
+def unpivot(input_path, cols, name="name", value="value", out=None, con=None,
+            quiet=False, disk_check=True):
+    """Reshape wide -> long: fold the named columns into two columns (a name
+    column and a value column). The complement of pivot / a 'melt'."""
+    own = con is None
+    con = con or connect(progress=(not quiet) and _tty())
+    try:
+        ensure_remote(con, input_path, out)
+        collist = ", ".join(_ident(c) for c in _aslist(cols))
+        q = (
+            f"SELECT * FROM (SELECT * FROM {_source(input_path)}) _t "
+            f"UNPIVOT ({_ident(value)} FOR {_ident(name)} IN ({collist}))"
+        )
         t0 = time.time()
         _disk_check(con, [input_path], out, skip=not disk_check)
         n = _copy(con, q, out, _copy_opts(out if out != "-" else "out.csv"))

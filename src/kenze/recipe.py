@@ -26,7 +26,11 @@ KNOWN_KEYS = {
     "input", "output", "keep", "drop", "filter", "bbox",
     "types", "fillna", "mask", "mask_method", "rename",
     "dedup", "sample", "head",
+    "assert", "assert_unique", "assert_not_null",
 }
+
+# keys that may appear multiple times -> collected into a list
+MULTI_KEYS = {"assert", "assert_unique", "assert_not_null"}
 
 REFERENCE = """kenze recipe (.dq) format
 =========================
@@ -48,7 +52,13 @@ Steps (use only the ones you need, in any order):
   dedup:    id                            drop duplicate rows (a column name, or: all)
   sample:   50000                         keep N random rows
   head:     100                           keep the first N rows
+  assert:   row_count > 0                 fail the run unless this holds (uses row_count)
+  assert_unique: id                       fail if these column(s) have duplicates
+  assert_not_null: id, email              fail if these columns contain nulls
   output:   PATH                          (required) where to write the result
+
+Assertions run BEFORE anything is written, so a failed check aborts with no output.
+You can list several assert / assert_unique / assert_not_null lines.
 
 Variables:  input: data/sales_${DAY}.parquet    (fill with --set DAY=2026-07-14 or the environment)
 
@@ -109,7 +119,10 @@ def parse(text: str, variables: dict | None = None) -> dict:
             val = [x.strip() for x in val[1:-1].split(",") if x.strip()]
         elif (val[:1], val[-1:]) in (('"', '"'), ("'", "'")):
             val = val[1:-1]
-        spec[key] = val
+        if key in MULTI_KEYS:
+            spec.setdefault(key, []).append(val)
+        else:
+            spec[key] = val
     for k in spec:
         if k not in KNOWN_KEYS:
             hint = difflib.get_close_matches(k, KNOWN_KEYS, n=1)

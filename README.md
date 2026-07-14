@@ -63,6 +63,8 @@ kenze clip     points.parquet --bbox -10,35,5,45    -o region.parquet
 kenze join     orders.csv users.parquet --on user_id -o joined.parquet
 kenze diff     old.csv new.csv --on id                # added / removed / changed
 kenze pivot    sales.csv --on city --values amount --agg sum --group region -o wide.csv
+kenze unpivot  wide.csv  --cols jan,feb,mar --name month --value sales -o long.csv
+kenze filter   "sales_*.csv" --where "amount>0" -o all.csv   # globs unify schemas
 kenze split    sales.parquet --by city -o by_city/    # one file per value
 kenze partition sales.parquet --by year -o lake/      # hive year=2026/ folders
 kenze convert  sales.parquet -o sales.csv             # just change format
@@ -104,6 +106,15 @@ kenze recipe                 # show every valid recipe step
 kenze eject clean.dq --to sql    # print the raw DuckDB SQL (no lock-in)
 ```
 
+Bake **data-quality tests** right into a recipe — they run before anything is written,
+so a failed check aborts with no output:
+
+```yaml
+assert:          row_count > 0
+assert_unique:   id
+assert_not_null: id, email
+```
+
 ## From Python
 
 ```python
@@ -121,6 +132,7 @@ kenze.profile("big.parquet")
 - `--source-format delta|iceberg` — read a Delta Lake or Apache Iceberg table.
 - `--memory-limit 8` — pin the RAM budget (GB) for reproducible / SLA runs (great for shared CI/Airflow nodes).
 - `--temp-dir D:/spill` — put disk-spill where there's room.
+- `--threads N` — cap how many CPU threads DuckDB uses.
 - `--skip-bad-lines` — ignore malformed rows in a dirty CSV.
 - `--log run.json` — write a run manifest (inputs, rows, timing).
 - Writes are **atomic** — a cancelled run never leaves a half-written file.
@@ -139,7 +151,7 @@ tbl = kenze.to_arrow("SELECT city, count(*) FROM 'big.parquet' GROUP BY 1")   # 
 
 `profile` · `peek` · `stats` · `check` · `validate` · `keep` · `drop` · `rename` · `cast` ·
 `fillna` · `mask` · `filter` · `dedup` · `sample` · `head` · `clip` · `convert` · `join` ·
-`diff` · `pivot` · `split` · `partition` · `sql` · `eject` · `init` · `run` · `recipe`
+`diff` · `pivot` · `unpivot` · `split` · `partition` · `sql` · `eject` · `init` · `run` · `recipe`
 
 ## Where it stops (on purpose)
 

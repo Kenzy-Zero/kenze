@@ -4,6 +4,20 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-07-14
+
+### Added
+- **Recipe assertions** — `assert: row_count > 0`, `assert_unique: id`,
+  `assert_not_null: id, email` inside a `.dq` recipe. They run *before* anything
+  is written, so a failed check aborts with no output. Build data-quality tests
+  right into your cleaning recipe.
+- **`unpivot`** — reshape wide to long (the complement of `pivot` / a "melt").
+- **Multi-file glob schema unification** — reading `sales_*.csv` (or parquet/json)
+  now uses `union_by_name`, so a column mismatch between files no longer crashes
+  the run.
+- **`--threads N`** — cap the threads DuckDB uses.
+- **`--log`** now also records the input and output schema (light lineage).
+
 ## [0.4.0] - 2026-07-14
 
 ### Added

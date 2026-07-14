@@ -24,6 +24,7 @@ from .ops import (
     run_sql,
     split,
     stats,
+    unpivot,
     validate,
 )
 from .recipe import REFERENCE
@@ -35,6 +36,7 @@ _GLOBAL_DEFAULTS = {
     "memory_limit": None, "temp_dir": None, "no_disk_check": False,
     "skip_bad_lines": False, "log": None, "quiet": False,
     "dry_run": False, "errors": None, "append": False, "source_format": None,
+    "threads": None,
 }
 
 
@@ -44,6 +46,8 @@ def _add_globals(parser):
     g.add_argument("--memory-limit", type=float, metavar="GB", default=s,
                    help="pin the RAM budget in GB (reproducible runs); default auto-sizes to free RAM")
     g.add_argument("--temp-dir", default=s, help="directory for disk-spill (default: system temp)")
+    g.add_argument("--threads", type=int, metavar="N", default=s,
+                   help="max threads DuckDB uses (default: all cores)")
     g.add_argument("--no-disk-check", action="store_true", default=s,
                    help="skip the pre-flight free-space check")
     g.add_argument("--skip-bad-lines", action="store_true", default=s,
@@ -161,6 +165,12 @@ def build_parser():
     sp.add_argument("--agg", default="sum", help="sum | count | avg | min | max | median")
     sp.add_argument("--group", help="row-identity column(s) to keep (optional)")
     sp.add_argument("-o", "--output", required=True)
+    sp = cmd("unpivot", help="reshape wide -> long (fold columns into name/value)")
+    sp.add_argument("input")
+    sp.add_argument("--cols", required=True, help="columns to fold, comma-separated")
+    sp.add_argument("--name", default="name", help="new name column (default: name)")
+    sp.add_argument("--value", default="value", help="new value column (default: value)")
+    sp.add_argument("-o", "--output", required=True)
 
     # power / interop
     sp = cmd("sql", help="run any DuckDB SQL (window fns, pivots, ...)")
@@ -186,6 +196,7 @@ def _con(a):
     return connect(
         temp_dir=a.temp_dir,
         memory_limit_gb=a.memory_limit,
+        threads=a.threads,
         progress=(not a.quiet) and sys.stderr.isatty(),
     )
 
@@ -245,6 +256,10 @@ def _combine(a):
         print("-> pivot")
         pivot(a.input, a.on, a.values, agg=a.agg, group=a.group, out=a.output,
               con=_con(a), quiet=a.quiet, disk_check=not a.no_disk_check)
+    elif a.cmd == "unpivot":
+        print("-> unpivot")
+        unpivot(a.input, a.cols, name=a.name, value=a.value, out=a.output,
+                con=_con(a), quiet=a.quiet, disk_check=not a.no_disk_check)
     elif a.cmd == "join":
         con = _con(a)
         try:

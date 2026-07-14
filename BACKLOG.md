@@ -64,6 +64,16 @@ External review triaged take / throw / thank. Built the "take" + "take-later" it
 - [throw] DuckDB-CLI overlap (marketing, not code) · one-man-maintenance risk (not codeable) · recipe-DSL fear (recipes are optional) · visual DAG (scope-creep) · cluster/horizontal-scale (by design).
 - [later-heavy] full Delta/Iceberg **upsert/write** + real state management = only if demand shows; NOT in lean core.
 
+## Feedback round 3 (2026-07-14, `feedback.txt`) -> triaged, v0.5 planned (NOT built yet)
+- [ ] ⭐ **recipe assertions** — `assert: row_count > 0`, `assert_unique: id` inside `.dq` (data-quality tests before commit; the headline / differentiator).
+- [ ] **`unpivot` / `melt`** — symmetric partner to `pivot` (DuckDB UNPIVOT; cheap).
+- [ ] **multi-file glob schema unification** — `sales_*.csv` type-mismatch crash -> DuckDB `union_by_name` (or a `--unify` flag).
+- [ ] **`--threads N`** — power-user override (answers "loss of fine-grained control" cheaply).
+- [ ] **enrich `--log`** with input+output schema (light lineage; NOT full OpenLineage).
+- [later-heavy] **Delta/Iceberg WRITE/upsert** — 2nd review to ask; DuckDB write support immature -> optional extension only if demand proven.
+- [thank / ALREADY HAVE] progress bar (DuckDB native, live) · dependency-lock-in (solved by `kenze sql` escape hatch) · credential vaulting (standard AWS chain is correct) · zero-copy Arrow / projection-pushdown / ASCII-streaming (real strengths -> use in marketing) · "Memory-Infra-Syntax trilemma" (great marketing line).
+- [throw] single-node/cluster · disk-spill-slowness · "deceptive CSV" (by design; doc tip = convert CSV->parquet for repeated heavy ops) · full OpenLineage/Marquez · "ejection overhead" (eject IS the feature) · 0-stars/SPOF/no-LTS (time+marketing, not codeable) · per-operator thread allocation (DuckDB-internal).
+
 ## 🚀 BIG BETS (own track, later)
 - [ ] **single binary** (PyInstaller / `curl | sh`) — slips past "pip is blocked on prod servers"
 - [ ] **WASM browser playground** (drag file → live recipe, 100% local) — best viral growth loop
