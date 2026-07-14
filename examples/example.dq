@@ -1,7 +1,9 @@
 # example recipe - clean a file in one streaming pass
 input:  data/sales.parquet
 keep:   [id, city, amount]
+types:  zip:VARCHAR
 filter: amount > 0
+fillna: city:Unknown
 dedup:  id
 sample: 50000
 output: out/clean.csv

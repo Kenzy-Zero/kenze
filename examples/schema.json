@@ -1,0 +1,8 @@
+{
+  "columns": {
+    "id": "VARCHAR",
+    "city": "VARCHAR",
+    "amount": "DOUBLE"
+  },
+  "not_null": ["id"]
+}

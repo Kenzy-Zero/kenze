@@ -15,3 +15,14 @@ examples/*_out.csv
 
 # local notes (not for the public repo)
 PROJECT_NOTES.md
+
+# secrets / credentials - NEVER commit or ship
+*accessKeys*.csv
+*credential*
+.pypirc
+*.pem
+.env
+*token*.txt
+
+# local screenshots / scratch
+Screenshot*.png
