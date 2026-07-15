@@ -189,6 +189,7 @@ def build_parser():
     sp.add_argument("--input", dest="init_input", help="a data file to pre-fill columns from")
 
     cmd("recipe", help="show the recipe (.dq) format and every valid step")
+    cmd("shell", help="interactive session: / command menu, live previews, build a recipe")
     return p
 
 
@@ -328,7 +329,16 @@ def _dispatch(a):
 
 
 def main(argv=None):
-    a = build_parser().parse_args(argv)
+    raw = list(sys.argv[1:]) if argv is None else list(argv)
+    # `kenze` (no args, interactive terminal) or `kenze shell` -> the session
+    if raw and raw[0] == "shell":
+        from .shell import run_shell
+        return run_shell(raw[1:])
+    if not raw and sys.stdin.isatty():
+        from .shell import run_shell
+        return run_shell()
+
+    a = build_parser().parse_args(raw)
     for k, v in _GLOBAL_DEFAULTS.items():   # backfill SUPPRESS'd globals
         if not hasattr(a, k):
             setattr(a, k, v)

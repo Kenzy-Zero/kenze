@@ -2,7 +2,7 @@
 
 Big-file data preparation that never runs out of memory. No SQL required.
 
-Version 0.5.0
+Version 0.6.0
 
 ---
 
@@ -56,6 +56,15 @@ A single identity is used throughout:
 
 There is one required system concept to understand and nothing else: point kenze
 at a file, name an operation, and name an output. Everything follows from that.
+
+kenze can be used two ways, over the same engine:
+
+- **Interactively.** Run `kenze` with no arguments to enter a live shell: load a
+  file once, stack steps that preview as you go, then run or save the result.
+  Every command below is available in the shell, along with a `/` command menu and
+  column autocomplete. The shell is documented in full in `SHELL.md`.
+- **As a one-line CLI.** `kenze <command> <input> -o <output>` — ideal for scripts,
+  cron, and pipelines. This document is the reference for that form.
 
 ---
 

@@ -6,13 +6,12 @@
 [![Downloads](https://img.shields.io/pypi/dm/kenze.svg)](https://pypi.org/project/kenze/)
 [![CI](https://github.com/Kenzy-Zero/kenze/actions/workflows/ci.yml/badge.svg)](https://github.com/Kenzy-Zero/kenze/actions/workflows/ci.yml)
 
-**Big-file data prep that never runs out of memory — no SQL required.**
+**Big-file data prep that never runs out of memory — an interactive shell *and* a one-line CLI.**
 
-`kenze` is a tiny command-line tool for cleaning and reshaping data files
-(CSV, Parquet, JSON) that are too big for pandas. It's a friendly front-end
-over [DuckDB](https://duckdb.org): DuckDB does the heavy lifting (streaming,
-disk-spill, all your CPU cores) and `kenze` makes it a one-liner — and
-auto-configures memory so your job doesn't crash.
+`kenze` cleans and reshapes data files (CSV, Parquet, JSON) that are too big for
+pandas. It's a friendly front-end over [DuckDB](https://duckdb.org): DuckDB does
+the heavy lifting (streaming, disk-spill, all your CPU cores), `kenze` makes it
+effortless — and auto-configures memory so your job doesn't crash.
 
 ```bash
 pip install kenze
@@ -20,16 +19,37 @@ pip install kenze
 
 One name for everything: `pip install kenze` → the `kenze` command → `import kenze`.
 
+## The interactive shell
+
+Just run `kenze`. You land in a live session: load a file once, stack simple
+steps (each **previews as you go**), then run the pipeline to a file or save it
+as a reusable recipe. Type `/` for a live command menu; **TAB** autocompletes
+your file's real column names.
+
+```
+kenze > load sales.parquet          # 60M rows, opens instantly
+kenze > filter amount > 0           # each step previews live
+kenze > keep id, city, amount
+kenze > dedup id
+kenze > assert-unique id            # a data-quality guard, checked before writing
+kenze > run clean.csv               # done: 41,files streamed, no OOM
+```
+
+It never loads more than it needs, so counts and previews on a 60-million-row file
+come back in well under a second, and full writes stream through DuckDB with a
+progress bar. Everything the CLI can do is in the shell — see **[SHELL.md](SHELL.md)**.
+
 ## Feature highlights
 
+- **An interactive shell** (`kenze`) with a `/` command menu, live previews, schema-aware autocomplete, and data-quality guards — plus the same as a one-line CLI for scripts and cron.
 - **Process files bigger than your RAM** without crashing — memory is auto-capped and DuckDB spills to disk.
-- **26 commands** for the everyday work: `keep`, `drop`, `filter`, `rename`, `cast`, `fillna`, `dedup`, `sample`, `join`, `diff`, `pivot`, `split`, `partition`, and more — no SQL needed.
+- **28 CLI commands** for the everyday work: `keep`, `drop`, `filter`, `rename`, `cast`, `fillna`, `dedup`, `sample`, `join`, `diff`, `pivot`, `split`, `partition`, and more — no SQL needed.
 - **Readable recipes** (`.dq` files) that chain steps into one streaming pass, with `${VAR}` templating for scheduled jobs.
 - **Read and write the cloud directly** — `s3://`, `gs://`, `https://` — nothing to download first.
-- **PII masking** (`mask --method hash`), **schema validation** (`validate`), and a **file-integrity pre-check** (`check`) for production pipelines.
+- **Data-quality guards** (`assert`, `assert_unique`, `assert_not_null`), **PII masking** (`mask`), **schema validation** (`validate`) — a failed check aborts before anything is written.
 - **No lock-in** — `eject` any recipe to raw DuckDB SQL or Python.
 - **Use it from Python too** — `import kenze` and call `kenze.sift(...)`, `kenze.sql(...)`.
-- **One dependency** at heart (DuckDB), atomic writes, and ASCII-clean output on any terminal.
+- Atomic writes and clean, cross-platform output on any terminal.
 
 ## Why
 
@@ -153,6 +173,10 @@ tbl = kenze.to_arrow("SELECT city, count(*) FROM 'big.parquet' GROUP BY 1")   # 
 `fillna` · `mask` · `filter` · `dedup` · `sample` · `head` · `clip` · `convert` · `join` ·
 `diff` · `pivot` · `unpivot` · `split` · `partition` · `sql` · `eject` · `init` · `run` · `recipe`
 
+Run any of these as a one-liner, or run `kenze` and do it all interactively — the
+shell wraps every command above plus session helpers (`open`, `set`, `dryrun`,
+`pwd`/`cd`, `undo`, `steps`). See **[SHELL.md](SHELL.md)** for the shell guide.
+
 ## Where it stops (on purpose)
 
 kenze is one dependency and one machine — that's the whole point. It maxes out
@@ -170,5 +194,12 @@ your PATH (this affects every pip-installed CLI). Options:
 - **Use it now, no setup:** `python -m kenze --help`
 - **Fix it for good:** reinstall Python from [python.org](https://www.python.org/downloads/)
   with **"Add python.exe to PATH"** ticked, or use `python -m pipx install kenze`.
+
+## Feedback, bugs & feature requests
+
+Found a bug, want a new command, or hit something confusing? **Open an issue:**
+[github.com/Kenzy-Zero/kenze/issues](https://github.com/Kenzy-Zero/kenze/issues).
+(The shell prints this link too — `help`.) Pull requests welcome; a
+[GitHub star](https://github.com/Kenzy-Zero/kenze) helps others find kenze.
 
 MIT licensed.

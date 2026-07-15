@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kenze"
-version = "0.5.0"
-description = "Big-file data prep that never runs out of memory - no SQL required. Powered by DuckDB."
+version = "0.6.0"
+description = "Big-file data prep that never runs out of memory - an interactive shell + one-line CLI, powered by DuckDB."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -29,9 +29,12 @@ classifiers = [
   "Topic :: Database",
   "Topic :: Utilities",
 ]
-# psutil is core: the never-OOM memory sizing is the headline feature, so it
-# ships by default rather than hiding behind an optional extra.
-dependencies = ["duckdb>=0.10", "psutil>=5.9"]
+# All three are core:
+#  - duckdb: the engine.
+#  - psutil: the never-OOM memory sizing (the headline feature).
+#  - prompt_toolkit: the interactive shell (`kenze` with no args) - the way most
+#    people will use kenze, so it ships by default, not behind an extra.
+dependencies = ["duckdb>=0.10", "psutil>=5.9", "prompt_toolkit>=3.0"]
 
 [project.optional-dependencies]
 # hand cleaned data straight to a fast in-memory dataframe (kenze.to_polars / to_arrow / to_df)

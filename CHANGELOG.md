@@ -4,6 +4,31 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-07-15
+
+### Added
+- **Interactive shell** — run `kenze` with no arguments (or `kenze shell`) and land
+  in a live session: load a file once, stack simple steps that **preview as you go**,
+  then run the pipeline to a file or save it as a recipe. Highlights:
+  - a `/` command menu, schema-aware **TAB autocomplete** of your file's columns,
+    command history, and a colour theme;
+  - **every CLI capability, in the shell** — inspect (`peek`/`schema`/`count`/`stats`/
+    `check`/`validate`), shape (`filter`/`keep`/`drop`/`rename`/`cast`/`fillna`/`mask`/
+    `dedup`/`clip`/`sample`/`head`), combine/reshape/split (`join`/`diff`/`pivot`/
+    `unpivot`/`split`/`partition`), guards (`assert`/`assert-unique`/`assert-not-null`),
+    and output (`run`/`save`/`dryrun`/`eject`/`sql`);
+  - session helpers: `open` a saved recipe to view/edit/run it, `set` for
+    memory/threads/skip-bad/temp/disk-check, `pwd`/`cd` for the output folder,
+    `undo`/`reset`/`steps`, and `recipe` for the format reference;
+  - `run` options in-shell: `append`, `errors <file>`, `log <file>`.
+- **`prompt_toolkit` is now a core dependency**, so the shell works out of the box
+  with a plain `pip install kenze`.
+- Documentation: a full shell guide in **SHELL.md**.
+
+### Notes
+- Running `kenze` with no arguments now opens the shell (previously it printed usage).
+  The one-line CLI is unchanged.
+
 ## [0.5.0] - 2026-07-14
 
 ### Added
