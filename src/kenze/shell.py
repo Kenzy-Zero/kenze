@@ -1003,12 +1003,20 @@ def make_completer(st):
                                          display=name, display_meta=desc)
                 return
             cmd = stripped.split(None, 1)[0].lstrip("/").lower()
-            cur = text.split()[-1] if not text.endswith((" ", "\t")) else ""
             if cmd in FILE_CMDS:
-                sub = Document(cur, len(cur))
+                # the WHOLE argument after the command is the path - it may contain
+                # spaces (`load my folder/data.csv`), so complete the full remainder,
+                # not just the last whitespace-separated token.
+                after = stripped.split(None, 1)
+                cur_path = after[1] if len(after) > 1 else ""
+                if cur_path[:1] in ("'", '"'):        # a quoted path being typed
+                    cur_path = cur_path[1:]
+                sub = Document(cur_path, len(cur_path))
                 for c in paths.get_completions(sub, complete_event):
                     yield c
-            elif cmd in COLUMN_CMDS and st.cols and ":" not in cur:
+                return
+            cur = text.split()[-1] if not text.endswith((" ", "\t")) else ""
+            if cmd in COLUMN_CMDS and st.cols and ":" not in cur:
                 if cmd == "filter":
                     # only suggest a column for the FIRST bare word of the
                     # condition; once an operator/space/quote appears it's SQL
