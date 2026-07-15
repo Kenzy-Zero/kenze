@@ -19,11 +19,13 @@ from .ops import (
     build_query,
     check,
     diff,
+    history,
     init,
     join,
     partition,
     peek,
     pivot,
+    plot,
     profile,
     run_spec,
     run_sql,
@@ -36,7 +38,7 @@ from .ops import (
     validate,
 )
 
-__version__ = "0.6.1"
+__version__ = "0.7.0"
 
 
 def sift(input, output, con=None, quiet=True, **steps):
@@ -69,7 +71,7 @@ def sql(query, con=None):
 __all__ = [
     "connect", "sift", "run", "sql", "init",
     "run_spec", "build_query", "run_sql",
-    "profile", "stats", "peek", "check", "validate",
+    "profile", "stats", "peek", "check", "validate", "plot", "history",
     "join", "diff", "split", "partition", "pivot", "unpivot",
     "to_arrow", "to_polars", "to_df",
     "__version__",

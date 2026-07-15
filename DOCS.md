@@ -2,7 +2,7 @@
 
 Big-file data preparation that never runs out of memory. No SQL required.
 
-Version 0.6.1
+Version 0.7.0
 
 ---
 
@@ -257,6 +257,31 @@ and works on files larger than memory.
 ```
 kenze stats sales.parquet
 ```
+
+#### plot
+
+Draw a quick ASCII chart in the terminal, to spot skew, outliers and dirty data
+without leaving the prompt or opening another tool. With `--by`, it draws a bar
+chart of an aggregate per category; without it, a numeric column becomes a
+histogram and a text column becomes top value-counts.
+
+```
+kenze plot sales.csv amount --by city      # bar chart: sum(amount) per city
+kenze plot sales.csv amount --bins 15      # histogram of a numeric column
+kenze plot sales.csv city                  # top value-counts of a text column
+```
+
+Options:
+- `--by COL` — a category column; the chart shows `agg(column)` for each value.
+- `--agg sum|count|avg|min|max|median` — the aggregate for `--by` (default `sum`,
+  or `count` when the charted column is non-numeric).
+- `--bins N` — number of histogram bins (numeric column, no `--by`; default 20).
+- `--top N` — the maximum number of bars to show (default 20).
+- `--width N` — bar width in characters (default 48).
+
+Bars use smooth Unicode blocks where the console supports them and fall back to a
+plain ASCII `#` bar otherwise. In the interactive shell, `plot` charts the current
+pipeline, so you can `filter` and then `plot` the filtered result.
 
 #### check
 
@@ -549,6 +574,21 @@ Options:
 - `--to sql` — emit the equivalent DuckDB SQL (default).
 - `--to python` — emit a small runnable Python snippet using DuckDB directly.
 
+#### history
+
+Show recent runs, recorded in a local ledger at `~/.kenze/history.jsonl`. Each
+successful transform, recipe run, join, pivot, split and so on appends one line
+(input, output, row count and timing), giving a lightweight, always-on audit trail
+of what you have run.
+
+```
+kenze history            # the last 20 runs
+kenze history --n 50     # the last 50
+```
+
+Recording is silent and best-effort. Disable it for a single run with
+`--no-history`, or globally with the environment variable `KENZE_NO_HISTORY=1`.
+
 ### 6.7 Recipes
 
 #### run
@@ -758,6 +798,8 @@ command name.
 | `--threads N` | Cap the number of CPU threads DuckDB uses (default: all cores). |
 | `--no-disk-check` | Skip the pre-flight free-space check. |
 | `--skip-bad-lines` | Ignore malformed rows in CSV input rather than stopping on them. |
+| `--skip N` | Skip N preamble rows before the CSV header — comment banners, blank lines and other junk that messy exports put at the top. |
+| `--no-history` | Do not record this run in the local run ledger (`~/.kenze/history.jsonl`). Recording can also be disabled globally with the environment variable `KENZE_NO_HISTORY=1`. |
 | `--errors PATH` | Quarantine malformed CSV rows to a file (with line/column diagnostics) and keep processing the good rows. |
 | `--append` | Append to an existing csv/json output instead of overwriting it. |
 | `--source-format FMT` | Read a lakehouse table: `delta` or `iceberg` (the extension is loaded on demand; needs internet the first time). |
@@ -816,6 +858,7 @@ kenze reads and writes:
 - CSV (`.csv`) and tab-separated values (`.tsv`)
 - Parquet (`.parquet`, `.pq`)
 - JSON and newline-delimited JSON (`.json`, `.ndjson`)
+- Excel workbooks (`.xlsx`, `.xls`), read and written via DuckDB's `excel` extension
 - Any of the above compressed with gzip (`.gz`), read and written transparently
 
 The format of an operation is determined by file extension, both for reading and

@@ -4,6 +4,27 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-07-15
+
+### Added
+- **`plot`** — quick ASCII charts right in the terminal / shell, to spot skew and
+  dirty data without leaving the prompt. `kenze plot amount --by city` draws a bar
+  chart of `sum(amount)` per city; `kenze plot amount` draws a histogram (numeric)
+  or top value-counts (text). In the shell it charts the **live pipeline**, so you
+  can `filter` then `plot` the result. Smooth Unicode bars where the console
+  supports them, ASCII `#` fallback otherwise.
+- **Excel (`.xlsx`) read and write** — read a workbook as input and write one as
+  output anywhere kenze takes a file (`kenze convert big.parquet -o report.xlsx`,
+  `kenze filter data.xlsx --where "amount>0" -o out.csv`). Powered by DuckDB's
+  `excel` extension — no extra Python dependency.
+- **`--skip N` / `load … skip N`** — skip junk preamble rows (comment banners,
+  blank lines) before the real CSV header in messy exports. The interactive shell
+  also **auto-detects** obvious preamble on `load` and skips it for you (a
+  "smart import"), telling you what it did.
+- **`history`** — a local run ledger (`~/.kenze/history.jsonl`). `kenze history`
+  shows recent runs (input → output, rows, time). Disable with `--no-history` or
+  `KENZE_NO_HISTORY=1`.
+
 ## [0.6.1] - 2026-07-15
 
 ### Fixed

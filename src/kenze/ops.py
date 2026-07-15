@@ -32,14 +32,17 @@ def _is_glob(path) -> bool:
     return isinstance(path, str) and any(c in path for c in "*?[")
 
 
-def _source(path: str, skip_bad: bool = False, fmt: str = None, errors: bool = False) -> str:
+def _source(path: str, skip_bad: bool = False, fmt: str = None,
+            errors: bool = False, skip: int = 0) -> str:
     """A FROM-able source for a path.
 
-    DuckDB auto-detects csv / parquet / json (and .gz) by extension. A `fmt` of
+    DuckDB auto-detects csv / parquet / json (and .gz) by extension; .xlsx / .xls
+    are read via read_xlsx (the caller loads the excel extension). A `fmt` of
     'delta' or 'iceberg' reads a lakehouse table (extension loaded by the caller).
-    `skip_bad` ignores malformed CSV rows; `errors` also quarantines them. When
-    the path is a glob (sales_*.csv), union_by_name aligns columns across files
-    so a schema mismatch between files doesn't crash the run.
+    `skip_bad` ignores malformed CSV rows; `errors` also quarantines them; `skip`
+    drops N preamble rows before the header. When the path is a glob
+    (sales_*.csv), union_by_name aligns columns across files so a schema mismatch
+    between files doesn't crash the run.
     """
     p = "'" + sql_path(path) + "'"
     if fmt in ("delta", "deltalake"):
@@ -47,14 +50,22 @@ def _source(path: str, skip_bad: bool = False, fmt: str = None, errors: bool = F
     if fmt == "iceberg":
         return f"iceberg_scan({p})"
 
-    glob = _is_glob(path)
     e = _ext(path)
+    if e in (".xlsx", ".xls"):
+        return f"read_xlsx({p})"
+
+    glob = _is_glob(path)
     is_csvish = e in ("", ".csv", ".tsv", ".txt", ".gz")
 
-    if is_csvish and (errors or skip_bad or glob):
+    if is_csvish and (errors or skip_bad or glob or skip):
         opts = ["auto_detect=true"]
         if glob:
             opts.append("union_by_name=true")
+        if skip:
+            # messy exports often have comment/blank preamble lines that trip the
+            # strict CSV sniffer even after skipping - relax it for skip mode.
+            opts.append(f"skip={int(skip)}")
+            opts.append("strict_mode=false")
         if errors:
             opts += ["ignore_errors=true", "store_rejects=true", f"rejects_table='{REJECTS_TABLE}'"]
         elif skip_bad:
@@ -65,6 +76,17 @@ def _source(path: str, skip_bad: bool = False, fmt: str = None, errors: bool = F
     if glob and e in (".json", ".ndjson"):
         return f"read_json({p}, union_by_name=true)"
     return p
+
+
+def _is_excel(path) -> bool:
+    return isinstance(path, str) and _ext(path) in (".xlsx", ".xls")
+
+
+def ensure_excel(con, *paths):
+    """Load the DuckDB excel extension the first time an .xlsx path is used, so
+    reading and writing Excel workbooks just works."""
+    if any(_is_excel(p) for p in paths if p):
+        load_extension(con, "excel")
 
 
 def _ext(path: str) -> str:
@@ -138,7 +160,8 @@ def _wrap_replace(q: str, items):
 
 def build_query(con, spec) -> str:
     src = _source(spec["input"], skip_bad=spec.get("skip_bad_lines"),
-                  fmt=spec.get("source_format"), errors=bool(spec.get("errors")))
+                  fmt=spec.get("source_format"), errors=bool(spec.get("errors")),
+                  skip=spec.get("skip") or 0)
     cols = columns(con, src)
 
     # base projection
@@ -211,6 +234,8 @@ def build_query(con, spec) -> str:
 def _copy_opts(path: str) -> str:
     ext = _ext(path)
     gz = path.lower().endswith(".gz")
+    if ext in (".xlsx", ".xls"):
+        return "(FORMAT xlsx, HEADER true)"
     if ext in (".parquet", ".pq"):
         return "(FORMAT PARQUET)"
     if ext in (".json", ".ndjson"):
@@ -255,7 +280,7 @@ def _copy_to(con, query, dst, copy_opts):
 
 def _count_file(con, path):
     try:
-        return con.execute(f"SELECT count(*) FROM '{sql_path(path)}'").fetchone()[0]
+        return con.execute(f"SELECT count(*) FROM {_source(path)}").fetchone()[0]
     except Exception:
         return 0
 
@@ -321,6 +346,97 @@ def _write_log(path, payload):
             json.dump(payload, f, indent=2)
     except OSError:
         pass
+
+
+# ---------------------------------------------------------------- run history
+
+_HISTORY_CAP = 2000   # keep the ledger from growing without bound
+
+
+def _history_path() -> str:
+    base = os.environ.get("KENZE_HOME") or os.path.join(os.path.expanduser("~"), ".kenze")
+    return os.path.join(base, "history.jsonl")
+
+
+def record_history(action, inp=None, out=None, rows=None, seconds=None, extra=None):
+    """Append one line to the local run ledger (~/.kenze/history.jsonl). Silent
+    and best-effort - never fails a run. Disable with KENZE_NO_HISTORY=1."""
+    if os.environ.get("KENZE_NO_HISTORY"):
+        return
+    try:
+        rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "action": action}
+        if inp is not None and inp != "-":
+            rec["input"] = inp
+        if out is not None and out != "-":
+            rec["output"] = out
+        if rows is not None:
+            rec["rows"] = rows
+        if seconds is not None:
+            rec["seconds"] = round(seconds, 3)
+        if extra:
+            rec.update(extra)
+        path = _history_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+        _trim_history(path)
+    except Exception:
+        pass
+
+
+def _trim_history(path):
+    try:
+        if os.path.getsize(path) < 400_000:
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        if len(lines) > _HISTORY_CAP:
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(lines[-_HISTORY_CAP:])
+    except OSError:
+        pass
+
+
+def history(n=20, con=None) -> int:
+    """Show the last N recorded runs (input -> output, rows, time)."""
+    path = _history_path()
+    if not os.path.exists(path):
+        print("\n  no run history yet - it fills in as you run kenze.\n")
+        return 0
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = [ln for ln in f if ln.strip()]
+    except OSError:
+        print("\n  could not read the history file.\n")
+        return 0
+    recs = []
+    for ln in raw[-int(n):]:
+        try:
+            recs.append(json.loads(ln))
+        except Exception:
+            pass
+    if not recs:
+        print("\n  no run history yet.\n")
+        return 0
+    rendered = []
+    for r in recs:
+        io = os.path.basename(str(r["input"])) if r.get("input") else ""
+        if r.get("output"):
+            io = (io + " -> " if io else "") + os.path.basename(str(r["output"]))
+        rows = f"{r['rows']:,} rows" if isinstance(r.get("rows"), int) else ""
+        secs = f"{r['seconds']:.1f}s" if isinstance(r.get("seconds"), (int, float)) else ""
+        tail = ", ".join(x for x in (rows, secs) if x)
+        when = str(r.get("at", "")).replace("T", " ")[:16]
+        rendered.append((when, str(r.get("action", "")), io, f"({tail})" if tail else ""))
+
+    aw = max((len(a) for _, a, _, _ in rendered), default=1)
+    iw = min(40, max((len(i) for _, _, i, _ in rendered), default=1))
+    print(f"\n  last {len(recs)} run(s)   ({path})\n")
+    for when, act, io, tail in rendered:
+        io_show = io if len(io) <= iw else io[: iw - 1] + "."
+        print(f"  {when}  {act.ljust(aw)}  {io_show.ljust(iw)}  {tail}")
+    print()
+    return len(recs)
 
 
 def _load_source_ext(con, fmt):
@@ -425,12 +541,14 @@ def _schema_of(con, sql):
 
 # ------------------------------------------------------------------ core run
 
-def run_spec(spec, con=None, quiet=False, disk_check=True, log=None, dry_run=False) -> int:
+def run_spec(spec, con=None, quiet=False, disk_check=True, log=None, dry_run=False,
+             action="run") -> int:
     own = con is None
     con = con or connect(progress=(not quiet) and _tty())
     stdin_tmp = None
     try:
         ensure_remote(con, spec.get("input"), spec.get("output"))
+        ensure_excel(con, spec.get("input"), spec.get("output"))
         _load_source_ext(con, spec.get("source_format"))
         if spec.get("input") == "-":
             stdin_tmp = _spool_stdin(temp_dir_of(con), spec.get("stdin_format", "csv"))
@@ -467,6 +585,7 @@ def run_spec(spec, con=None, quiet=False, disk_check=True, log=None, dry_run=Fal
                 "output_schema": _schema_of(con, q),
                 "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             })
+        record_history(action, spec.get("input"), out, n, secs)
         return n
     finally:
         if stdin_tmp:
@@ -484,13 +603,14 @@ def _tty():
 
 # --------------------------------------------------------------- inspect ops
 
-def profile(path, con=None, fmt=None) -> int:
+def profile(path, con=None, fmt=None, skip=0) -> int:
     own = con is None
     con = con or connect()
     try:
         ensure_remote(con, path)
+        ensure_excel(con, path)
         _load_source_ext(con, fmt)
-        src = _source(path, fmt=fmt)
+        src = _source(path, fmt=fmt, skip=skip)
         schema = con.execute(f"DESCRIBE SELECT * FROM {src}").fetchall()
         n = con.execute(f"SELECT count(*) FROM {src}").fetchone()[0]
         size = os.path.getsize(path) if (not is_remote(path) and os.path.isfile(path)) else 0
@@ -505,14 +625,15 @@ def profile(path, con=None, fmt=None) -> int:
             con.close()
 
 
-def stats(path, con=None, fmt=None):
+def stats(path, con=None, fmt=None, skip=0):
     """Per-column summary (min/max/nulls/approx-unique) via DuckDB SUMMARIZE."""
     own = con is None
     con = con or connect()
     try:
         ensure_remote(con, path)
+        ensure_excel(con, path)
         _load_source_ext(con, fmt)
-        src = _source(path, fmt=fmt)
+        src = _source(path, fmt=fmt, skip=skip)
         rows = con.execute(f"SUMMARIZE SELECT * FROM {src}").fetchall()
         cols = [d[0] for d in con.description]
         show = [c for c in ("column_name", "column_type", "min", "max", "approx_unique", "null_percentage") if c in cols]
@@ -534,15 +655,16 @@ def _s(v):
     return "" if v is None else str(v)
 
 
-def peek(path, n=20, con=None, fmt=None):
+def peek(path, n=20, con=None, fmt=None, skip=0):
     """A quick, zero-dependency look: first N rows as an aligned table,
     plus each column's type and null count (over the sample)."""
     own = con is None
     con = con or connect()
     try:
         ensure_remote(con, path)
+        ensure_excel(con, path)
         _load_source_ext(con, fmt)
-        src = _source(path, fmt=fmt)
+        src = _source(path, fmt=fmt, skip=skip)
         schema = con.execute(f"DESCRIBE SELECT * FROM {src}").fetchall()
         names = [r[0] for r in schema]
         types = {r[0]: r[1] for r in schema}
@@ -584,7 +706,8 @@ def check(path, con=None) -> int:
     con = con or connect()
     try:
         ensure_remote(con, path)
-        p = "'" + sql_path(path) + "'"
+        ensure_excel(con, path)
+        p = _source(path)
         if _ext(path) in ("", ".csv", ".tsv", ".txt", ".gz"):
             good = con.execute(
                 f"SELECT count(*) FROM read_csv({p}, ignore_errors=true, auto_detect=true)"
@@ -651,6 +774,207 @@ def validate(path, schema_path, con=None) -> int:
             con.close()
 
 
+# ------------------------------------------------------------- plot (ascii)
+
+_NUMERIC_TYPES = ("INT", "DEC", "DOUBLE", "FLOAT", "REAL", "NUMERIC",
+                  "HUGEINT", "BIGINT", "TINYINT", "SMALLINT", "UINT", "UBIGINT")
+
+
+def _is_numeric_type(t) -> bool:
+    return any(k in str(t).upper() for k in _NUMERIC_TYPES)
+
+
+def _match_col(cols, name):
+    for c in cols:
+        if c.lower() == str(name).lower():
+            return c
+    raise ValueError(f"column '{name}' not found. columns: {', '.join(cols)}")
+
+
+def _bar_glyphs():
+    """Smooth unicode eighth-blocks when the console can encode them, else a
+    plain ASCII '#' bar (so it never crashes a cp1252 Windows console)."""
+    full, parts = "█", " ▏▎▍▌▋▊▉"
+    try:
+        enc = sys.stdout.encoding or "utf-8"
+        (full + parts).encode(enc)
+        return full, parts
+    except (UnicodeEncodeError, LookupError, AttributeError, TypeError):
+        return "#", ""
+
+
+def _make_bar(v, maxv, width, full, parts):
+    if maxv <= 0:
+        return ""
+    eighths = int(round(max(0.0, v / maxv) * width * 8))
+    if v > 0 and eighths == 0:
+        eighths = 1
+    whole, rem = divmod(eighths, 8)
+    bar = full * whole
+    if parts and rem:
+        bar += parts[rem]
+    elif not parts and v > 0 and not bar:
+        bar = full
+    return bar
+
+
+def _fmt_v(v):
+    if v is None:
+        return "0"
+    if float(v).is_integer():
+        return f"{int(v):,}"
+    return f"{v:,.2f}"
+
+
+def _num_edge(x):
+    ax = abs(x)
+    if ax != 0 and (ax < 0.01 or ax >= 1e7):
+        return f"{x:.2e}"
+    if float(x).is_integer():
+        return f"{int(x):,}"
+    return f"{x:,.2f}"
+
+
+def _print_bars(title, data, width=48):
+    """data = [(label, value), ...] already ordered. Prints an ASCII bar chart."""
+    print("\n  " + title)
+    if not data:
+        print("  (no data)\n")
+        return
+    full, parts = _bar_glyphs()
+    maxv = max((v for _, v in data), default=0) or 0
+    lw = min(28, max((len(k) for k, _ in data), default=1))
+    vw = max((len(_fmt_v(v)) for _, v in data), default=1)
+    print()
+    for k, v in data:
+        label = k if len(k) <= lw else k[: lw - 1] + "."
+        bar = _make_bar(v, maxv, width, full, parts)
+        print(f"  {label.ljust(lw)}  {bar.ljust(width)}  {_fmt_v(v).rjust(vw)}")
+    print()
+
+
+def plot(path, column, by=None, agg=None, bins=20, top=20, width=48, con=None, fmt=None):
+    """Draw a quick ASCII chart in the terminal - spot skew / dirty data fast.
+
+      plot sales.csv amount              -> histogram (numeric) or top values (text)
+      plot sales.csv amount --by city    -> bar chart of agg(amount) per city
+    """
+    own = con is None
+    con = con or connect()
+    try:
+        ensure_remote(con, path)
+        ensure_excel(con, path)
+        _load_source_ext(con, fmt)
+        src = _source(path, fmt=fmt)
+        return plot_from(con, src, column, by=by, agg=agg, bins=bins, top=top, width=width)
+    finally:
+        if own:
+            con.close()
+
+
+def plot_from(con, src, column, by=None, agg=None, bins=20, top=20, width=48):
+    """The plot engine over an already-resolved FROM source (a quoted path or a
+    parenthesised subquery) - lets the interactive shell chart the live pipeline."""
+    types = {r[0]: r[1] for r in con.execute(f"DESCRIBE SELECT * FROM {src}").fetchall()}
+    col = _match_col(list(types), column)
+    numeric = _is_numeric_type(types[col])
+
+    if by:
+        cat = _match_col(list(types), by)
+        fn = str(agg or ("sum" if numeric else "count")).lower()
+        fn = "avg" if fn == "mean" else fn
+        if fn not in _AGGS:
+            raise ValueError(f"--agg must be one of: {', '.join(sorted(_AGGS))}")
+        expr = "count(*)" if fn == "count" else f"{fn}({_ident(col)})"
+        rows = con.execute(
+            f"SELECT CAST({_ident(cat)} AS VARCHAR) AS k, {expr} AS v FROM {src} "
+            f"WHERE {_ident(cat)} IS NOT NULL GROUP BY 1 "
+            f"ORDER BY v DESC NULLS LAST LIMIT {int(top)}"
+        ).fetchall()
+        title = f"{fn}({col}) by {cat}   (top {len(rows)})"
+        _print_bars(title, [(_s(k), float(v or 0)) for k, v in rows], width)
+        return len(rows)
+
+    if numeric:
+        lo, hi, n = con.execute(
+            f"SELECT min({_ident(col)}), max({_ident(col)}), count({_ident(col)}) FROM {src}"
+        ).fetchone()
+        if not n or lo is None:
+            print(f"\n  {col}: no numeric values to plot\n")
+            return 0
+        lo, hi, B = float(lo), float(hi), max(1, int(bins))
+        if hi <= lo:
+            _print_bars(f"{col}   ({n:,} rows, all = {_num_edge(lo)})",
+                        [(f"{_num_edge(lo)}", float(n))], width)
+            return 1
+        bw = (hi - lo) / B
+        raw = con.execute(
+            f"SELECT LEAST({B - 1}, GREATEST(0, CAST(floor(({_ident(col)} - {lo}) / {bw}) AS BIGINT))) AS b, "
+            f"count(*) AS c FROM {src} WHERE {_ident(col)} IS NOT NULL GROUP BY b"
+        ).fetchall()
+        counts = {int(b): int(c) for b, c in raw}
+        data = [
+            (f"[{_num_edge(lo + i * bw)}, {_num_edge(lo + (i + 1) * bw)})", float(counts.get(i, 0)))
+            for i in range(B)
+        ]
+        _print_bars(f"{col}   histogram ({B} bins, {n:,} values)", data, width)
+        return B
+
+    # categorical column, no --by: value counts
+    rows = con.execute(
+        f"SELECT CAST({_ident(col)} AS VARCHAR) AS k, count(*) AS v FROM {src} "
+        f"GROUP BY 1 ORDER BY v DESC LIMIT {int(top)}"
+    ).fetchall()
+    _print_bars(f"{col}   value counts (top {len(rows)})",
+                [(_s(k), float(v)) for k, v in rows], width)
+    return len(rows)
+
+
+# ---------------------------------------------------------- messy-csv sniffer
+
+def sniff_preamble(path, probe=25) -> int:
+    """Best-effort: how many junk/preamble lines sit before the real CSV header
+    (blank lines, or lines with a different delimiter-count than the data body)?
+    Returns a small int suggestion (0 = looks clean). Local csv/text only."""
+    if is_remote(path) or _ext(path) not in ("", ".csv", ".tsv", ".txt"):
+        return 0
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace", newline="") as f:
+            lines = []
+            for _ in range(probe):
+                ln = f.readline()
+                if not ln:
+                    break
+                lines.append(ln.rstrip("\r\n"))
+    except OSError:
+        return 0
+    if len(lines) < 3:
+        return 0
+
+    import collections
+    if _ext(path) == ".tsv":
+        delim = "\t"
+    else:
+        body = lines[3:] or lines
+        delim = max((",", ";", "\t", "|"), key=lambda d: sum(ln.count(d) for ln in body))
+        if not sum(ln.count(delim) for ln in body):
+            delim = ","
+    counts = [ln.count(delim) for ln in lines]
+    body_counts = [c for c in counts[min(len(counts) - 1, 3):] if c > 0]
+    modal = collections.Counter(body_counts).most_common(1)
+    if not modal:
+        return 0
+    mode = modal[0][0]
+
+    skip = 0
+    for i, ln in enumerate(lines[:-1]):
+        if ln.strip() == "" or counts[i] != mode:
+            skip += 1
+        else:
+            break
+    return skip if 0 < skip <= min(10, len(lines) // 2) else 0
+
+
 # ------------------------------------------------------------- combine / diff
 
 def join(left, right, on, how="inner", out=None, con=None, quiet=False, disk_check=True):
@@ -658,6 +982,7 @@ def join(left, right, on, how="inner", out=None, con=None, quiet=False, disk_che
     con = con or connect(progress=(not quiet) and _tty())
     try:
         ensure_remote(con, left, right, out)
+        ensure_excel(con, left, right, out)
         keys = _aslist(on)
         using = "(" + ", ".join(_ident(k) for k in keys) + ")"
         how_sql = {"inner": "INNER", "left": "LEFT", "right": "RIGHT", "full": "FULL", "outer": "FULL"}
@@ -673,6 +998,7 @@ def join(left, right, on, how="inner", out=None, con=None, quiet=False, disk_che
         n = _copy(con, q, out, _copy_opts(out if out != "-" else "out.csv"))
         if not quiet and out != "-":
             print(f"  done: {n:,} rows -> {out}  ({time.time() - t0:,.1f}s)")
+        record_history("join", left, out, n, time.time() - t0)
         return n
     finally:
         if own:
@@ -739,6 +1065,7 @@ def partition(input_path, by, out_dir, fmt="parquet", con=None, quiet=False):
         con.execute(f"COPY (SELECT * FROM {_source(input_path)}) TO {dst} {opts}")
         if not quiet:
             print(f"  done: partitioned by {', '.join(cols)} -> {out_dir}/\n")
+        record_history("partition", input_path, out_dir)
         return out_dir
     finally:
         if own:
@@ -756,6 +1083,7 @@ def pivot(input_path, on, values, agg="sum", group=None, out=None, con=None,
     con = con or connect(progress=(not quiet) and _tty())
     try:
         ensure_remote(con, input_path, out)
+        ensure_excel(con, input_path, out)
         fn = str(agg).lower()
         fn = "avg" if fn == "mean" else fn
         if fn not in _AGGS:
@@ -772,6 +1100,7 @@ def pivot(input_path, on, values, agg="sum", group=None, out=None, con=None,
         n = _copy(con, q, out, _copy_opts(out if out != "-" else "out.csv"))
         if not quiet and out != "-":
             print(f"  done: {n:,} rows -> {out}  ({time.time() - t0:,.1f}s)")
+        record_history("pivot", input_path, out, n, time.time() - t0)
         return n
     finally:
         if own:
@@ -786,6 +1115,7 @@ def unpivot(input_path, cols, name="name", value="value", out=None, con=None,
     con = con or connect(progress=(not quiet) and _tty())
     try:
         ensure_remote(con, input_path, out)
+        ensure_excel(con, input_path, out)
         collist = ", ".join(_ident(c) for c in _aslist(cols))
         q = (
             f"SELECT * FROM (SELECT * FROM {_source(input_path)}) _t "
@@ -796,6 +1126,7 @@ def unpivot(input_path, cols, name="name", value="value", out=None, con=None,
         n = _copy(con, q, out, _copy_opts(out if out != "-" else "out.csv"))
         if not quiet and out != "-":
             print(f"  done: {n:,} rows -> {out}  ({time.time() - t0:,.1f}s)")
+        record_history("unpivot", input_path, out, n, time.time() - t0)
         return n
     finally:
         if own:
@@ -809,10 +1140,12 @@ def run_sql(query, out=None, con=None, quiet=False, disk_check=True):
     con = con or connect(progress=(not quiet) and _tty())
     try:
         if out:
+            ensure_excel(con, out)
             t0 = time.time()
             n = _copy(con, query, out, _copy_opts(out if out != "-" else "out.csv"))
             if not quiet and out != "-":
                 print(f"  done: {n:,} rows -> {out}  ({time.time() - t0:,.1f}s)")
+            record_history("sql", None, out, n, time.time() - t0)
             return n
         rows = con.execute(query).fetchall()
         names = [d[0] for d in con.description]
@@ -864,6 +1197,7 @@ def split(input_path, by, out_dir, fmt="csv", con=None, max_groups=2000):
     con = con or connect()
     try:
         ensure_remote(con, input_path)
+        ensure_excel(con, input_path)
         src = _source(input_path)
         cols = columns(con, src)
         match = [c for c in cols if c.lower() == by.lower()]
@@ -890,11 +1224,14 @@ def split(input_path, by, out_dir, fmt="csv", con=None, max_groups=2000):
             else:
                 used[name] = 0
             where = f"{_ident(col)} IS NULL" if v is None else f"{_ident(col)} = {_sql_literal(v)}"
-            dst = "'" + sql_path(os.path.join(out_dir, f"{name}.{ext}")) + "'"
-            n = con.execute(f"COPY (SELECT * FROM {src} WHERE {where}) TO {dst} {opts}").fetchone()[0]
+            fpath = os.path.join(out_dir, f"{name}.{ext}")
+            dst = "'" + sql_path(fpath) + "'"
+            row = con.execute(f"COPY (SELECT * FROM {src} WHERE {where}) TO {dst} {opts}").fetchone()
+            n = row[0] if row else _count_file(con, fpath)
             total += n
             print(f"  {name}.{ext}: {n:,} rows")
         print(f"  done: {len(vals)} files, {total:,} rows -> {out_dir}")
+        record_history("split", input_path, out_dir, total, extra={"files": len(vals)})
         return len(vals)
     finally:
         if own:

@@ -54,12 +54,13 @@ clears them all (the file stays loaded), and loading a new file starts fresh.
 ### Look at data
 | command | what it does |
 |---|---|
-| `load <file>` | load a data file into the session (csv / parquet / json / gzip / `s3://...`) |
+| `load <file>` | load a data file (csv / parquet / json / gzip / **xlsx** / `s3://...`). `load messy.csv skip 3` drops preamble rows; obvious junk is auto-skipped for you |
 | `open <recipe.dq>` | open a saved recipe into the session to view, tweak (`undo` / add steps) and run |
 | `peek [n]` | preview the first rows (default 10) of the current pipeline |
 | `schema` | the current columns and their types |
 | `count` | how many rows the current pipeline produces |
 | `stats` | per-column summary: min / max / nulls / approx-unique |
+| `plot <col> [by <cat>]` | an ascii chart of the **live pipeline**: `plot amount` (histogram / value-counts) or `plot amount by city` (bar chart). Options: `agg sum\|count\|avg\|...`, `bins N`, `top N` |
 | `check [file]` | integrity scan: readable? how many malformed rows? |
 | `validate <schema.json> [file]` | check the file against a target schema |
 
@@ -123,6 +124,7 @@ aborts and no output file is produced. Saved into the recipe by `save`.
 | `pwd` | show the output folder (where `run` / `save` write) |
 | `cd <dir>` | change the output folder |
 | `set` | show / change session settings (see below) |
+| `history [n]` | your recent runs (input -> output, rows, time), from `~/.kenze/history.jsonl` |
 | `recipe` | show the `.dq` recipe format reference |
 | `help` | the guided command list |
 | `clear` | clear the screen |
@@ -213,9 +215,10 @@ production - kenze never locks you in.
 
 ## Everything the CLI can do
 
-As of 0.6.0 the shell covers the whole CLI: single-file cleaning, combine/reshape/
-split, integrity checks, data-quality guards, opening and running saved recipes, and
-every power setting (`set` for memory / threads / skip-bad / temp / disk-check, `run`
+The shell covers the whole CLI: single-file cleaning, combine/reshape/split,
+integrity checks, ascii `plot` charts, Excel (`.xlsx`) read/write, messy-CSV `skip`,
+run `history`, data-quality guards, opening and running saved recipes, and every
+power setting (`set` for memory / threads / skip-bad / temp / disk-check, `run`
 options for append / errors / log, `load ... as delta|iceberg`). The only thing that
 lives outside the shell is the Python API (`import kenze; kenze.to_polars(...)`),
 which is a library, not a shell command.

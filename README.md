@@ -29,10 +29,11 @@ your file's real column names.
 ```
 kenze > load sales.parquet          # 60M rows, opens instantly
 kenze > filter amount > 0           # each step previews live
+kenze > plot amount --by city       # ascii bar chart of the live data
 kenze > keep id, city, amount
 kenze > dedup id
 kenze > assert-unique id            # a data-quality guard, checked before writing
-kenze > run clean.csv               # done: 41,files streamed, no OOM
+kenze > run clean.csv               # streamed through DuckDB, no OOM
 ```
 
 It never loads more than it needs, so counts and previews on a 60-million-row file
@@ -43,9 +44,13 @@ progress bar. Everything the CLI can do is in the shell — see **[SHELL.md](htt
 
 - **An interactive shell** (`kenze`) with a `/` command menu, live previews, schema-aware autocomplete, and data-quality guards — plus the same as a one-line CLI for scripts and cron.
 - **Process files bigger than your RAM** without crashing — memory is auto-capped and DuckDB spills to disk.
-- **28 CLI commands** for the everyday work: `keep`, `drop`, `filter`, `rename`, `cast`, `fillna`, `dedup`, `sample`, `join`, `diff`, `pivot`, `split`, `partition`, and more — no SQL needed.
+- **32 CLI commands** for the everyday work: `keep`, `drop`, `filter`, `rename`, `cast`, `fillna`, `dedup`, `sample`, `join`, `diff`, `pivot`, `split`, `partition`, and more — no SQL needed.
+- **See your data** — `plot amount --by city` draws an ASCII bar chart or histogram right in the terminal, so you spot skew and dirty data instantly.
+- **Excel in and out** — read and write `.xlsx` workbooks natively (`convert big.parquet -o report.xlsx`), no extra dependency.
+- **Messy CSVs, handled** — `--skip N` drops junk preamble rows; the shell even auto-detects and skips them for you.
 - **Readable recipes** (`.dq` files) that chain steps into one streaming pass, with `${VAR}` templating for scheduled jobs.
 - **Read and write the cloud directly** — `s3://`, `gs://`, `https://` — nothing to download first.
+- **A run ledger** — `history` shows your recent runs (input → output, rows, time).
 - **Data-quality guards** (`assert`, `assert_unique`, `assert_not_null`), **PII masking** (`mask`), **schema validation** (`validate`) — a failed check aborts before anything is written.
 - **No lock-in** — `eject` any recipe to raw DuckDB SQL or Python.
 - **Use it from Python too** — `import kenze` and call `kenze.sift(...)`, `kenze.sql(...)`.
@@ -67,6 +72,8 @@ progress bar. Everything the CLI can do is in the shell — see **[SHELL.md](htt
 kenze profile  sales.parquet                          # schema + row count, instantly
 kenze peek     sales.parquet                           # first rows + types + null counts
 kenze stats    sales.parquet                           # per-column min/max/nulls/unique
+kenze plot     sales.parquet amount --by city          # ascii bar chart in the terminal
+kenze plot     sales.parquet amount                    # ascii histogram of a numeric column
 kenze check    sales.csv                               # is the file valid? any bad rows?
 
 kenze keep     sales.parquet --cols id,city,amount -o small.csv
@@ -87,9 +94,11 @@ kenze unpivot  wide.csv  --cols jan,feb,mar --name month --value sales -o long.c
 kenze filter   "sales_*.csv" --where "amount>0" -o all.csv   # globs unify schemas
 kenze split    sales.parquet --by city -o by_city/    # one file per value
 kenze partition sales.parquet --by year -o lake/      # hive year=2026/ folders
-kenze convert  sales.parquet -o sales.csv             # just change format
+kenze convert  sales.parquet -o report.xlsx          # write a real Excel workbook
+kenze keep     messy.csv --cols id,amount --skip 3 -o clean.csv  # drop junk preamble
 
 kenze sql  "SELECT *, lag(amount) OVER (ORDER BY ts) FROM 'sales.parquet'" -o out.csv
+kenze history                                         # your recent runs
 ```
 
 Read or write the cloud directly (nothing to download first):
@@ -154,7 +163,9 @@ kenze.profile("big.parquet")
 - `--temp-dir D:/spill` — put disk-spill where there's room.
 - `--threads N` — cap how many CPU threads DuckDB uses.
 - `--skip-bad-lines` — ignore malformed rows in a dirty CSV.
+- `--skip N` — skip N preamble rows before the CSV header (comment banners, blank lines).
 - `--log run.json` — write a run manifest (inputs, rows, timing).
+- `--no-history` — don't record this run in `~/.kenze/history.jsonl`.
 - Writes are **atomic** — a cancelled run never leaves a half-written file.
 
 ## Hand off to a dataframe
@@ -169,9 +180,9 @@ tbl = kenze.to_arrow("SELECT city, count(*) FROM 'big.parquet' GROUP BY 1")   # 
 
 ## Commands
 
-`profile` · `peek` · `stats` · `check` · `validate` · `keep` · `drop` · `rename` · `cast` ·
+`profile` · `peek` · `stats` · `plot` · `check` · `validate` · `keep` · `drop` · `rename` · `cast` ·
 `fillna` · `mask` · `filter` · `dedup` · `sample` · `head` · `clip` · `convert` · `join` ·
-`diff` · `pivot` · `unpivot` · `split` · `partition` · `sql` · `eject` · `init` · `run` · `recipe`
+`diff` · `pivot` · `unpivot` · `split` · `partition` · `sql` · `eject` · `init` · `run` · `recipe` · `history`
 
 Run any of these as a one-liner, or run `kenze` and do it all interactively — the
 shell wraps every command above plus session helpers (`open`, `set`, `dryrun`,

@@ -13,13 +13,14 @@ colourful session:
 Each step builds a live recipe with previews; `save clean.dq` / `eject` / `run`
 graduate the session out to a file or raw SQL - no lock-in.
 
-The pretty shell (colours, / menu, TAB autofill) needs `prompt_toolkit`:
-    pip install kenze[shell]
-Without it, a plain line-based REPL still works (just no colour/menu).
+The pretty shell (colours, / menu, TAB autofill) uses `prompt_toolkit`, which ships
+with kenze as a core dependency. On a terminal that can't be driven for a rich UI
+(some minimal shells), a plain line-based REPL still works (just no colour/menu).
 """
 from __future__ import annotations
 
 import os
+import re
 
 from . import __version__
 from .engine import connect
@@ -32,11 +33,14 @@ from .ops import (
     columns,
     diff,
     eject,
+    history,
     join,
     partition,
     pivot,
+    plot_from,
     run_spec,
     run_sql,
+    sniff_preamble,
     split,
     unpivot,
     validate,
@@ -50,6 +54,7 @@ COMMANDS = {
     "schema": ("LOOK", "show the current columns + types"),
     "count":  ("LOOK", "count rows in the current pipeline"),
     "stats":  ("LOOK", "per-column summary (min/max/nulls/unique)"),
+    "plot":   ("LOOK", "quick ascii chart of a column (histogram / bar)"),
     "check":  ("LOOK", "integrity scan: readable? how many bad rows?"),
     "validate": ("LOOK", "check the file against a schema json"),
     "keep":   ("SHAPE", "keep only these columns"),
@@ -83,6 +88,7 @@ COMMANDS = {
     "pwd":    ("SHELL", "show the output folder (where run/save write)"),
     "cd":     ("SHELL", "change the output folder"),
     "set":    ("SHELL", "session settings: memory / threads / skip-bad / temp / disk-check"),
+    "history": ("SHELL", "recent kenze runs (input -> output, rows, time)"),
     "recipe": ("SHELL", "show the .dq recipe format reference"),
     "help":   ("SHELL", "the guided command list"),
     "clear":  ("SHELL", "clear the screen"),
@@ -93,7 +99,7 @@ GROUPS = [("LOOK", "look at data"), ("SHAPE", "shape it"),
           ("PIPE", "the pipeline"), ("OUT", "get it out"), ("SHELL", "shell")]
 # commands whose arguments are (mostly) column names -> schema autocomplete
 COLUMN_CMDS = {"keep", "drop", "filter", "rename", "cast", "fillna", "mask",
-               "dedup", "pivot", "unpivot", "split", "partition",
+               "dedup", "pivot", "unpivot", "split", "partition", "plot",
                "assert-unique", "assert-not-null"}
 # commands whose first argument is a file path -> path autocomplete
 FILE_CMDS = {"load", "open", "save", "run"}
@@ -198,6 +204,7 @@ class ShellState:
         self.mem_gb = None       # None = auto-size to free RAM
         self.threads = None      # None = all cores
         self.skip_bad = False    # ignore malformed CSV rows on read
+        self.skip = 0            # preamble rows to skip on the loaded csv
         self.source_format = None  # 'delta' | 'iceberg' for the loaded file
         self.temp_dir = None     # disk-spill location (None = system temp)
         self.disk_check = True   # pre-flight free-space check before a write
@@ -223,6 +230,8 @@ class ShellState:
             spec["input"] = self.input
         if self.skip_bad:
             spec["skip_bad_lines"] = True
+        if self.skip:
+            spec["skip"] = self.skip
         if self.source_format:
             spec["source_format"] = self.source_format
         filters, casts, fills, renames = [], [], [], []
@@ -310,26 +319,56 @@ def _print_table(st, query, n=8):
 
 def h_load(st, arg):
     if not arg:
-        _say("  usage: load <file.csv|parquet|json|s3://...>", "warn")
+        _say("  usage: load <file>    (optional:  load messy.csv skip 3   |   load t as delta)", "warn")
         return
-    path = arg.strip()
+    raw = arg.strip()
     fmt = None                               # load <path> as delta|iceberg
     for f in ("delta", "iceberg"):
-        if path.lower().endswith(" as " + f):
-            fmt, path = f, path[: -(4 + len(f))].strip()
-    path = path.strip('"').strip("'")
-    try:                                     # actually read the schema first,
-        from .engine import ensure_remote    # so a missing/unreadable file fails
-        ensure_remote(st.con, path)          # loudly instead of faking success
+        if raw.lower().endswith(" as " + f):
+            fmt, raw = f, raw[: -(4 + len(f))].strip()
+    skip = 0                                 # load <path> skip N  (drop preamble)
+    m = re.search(r"\s+skip\s+(\d+)\s*$", raw, re.IGNORECASE)
+    if m:
+        skip, raw = int(m.group(1)), raw[: m.start()].strip()
+    path = raw.strip('"').strip("'")
+
+    guess = 0                                # sniff obvious junk preamble
+    if not skip and not fmt:
+        try:
+            guess = sniff_preamble(path)
+        except Exception:
+            guess = 0
+
+    def _read(skip_n):
+        probe = {"input": path, "skip_bad_lines": st.skip_bad,
+                 "source_format": fmt, "skip": skip_n}
+        return columns(st.con, f"({build_query(st.con, probe)})")
+
+    try:                                     # read the schema first, so a
+        from .engine import ensure_remote    # missing/unreadable file fails loudly
+        ensure_remote(st.con, path)
         _load_source_ext(st.con, fmt)        # delta/iceberg extension on demand
-        probe = {"input": path, "skip_bad_lines": st.skip_bad, "source_format": fmt}
-        cols = columns(st.con, f"({build_query(st.con, probe)})")
+        try:
+            cols = _read(skip)
+            if not skip and guess:           # loaded, but preamble may be polluting it
+                _say(f"  heads-up: {guess} preamble line(s) detected - if the columns below "
+                     f"look wrong, reload with  `load {os.path.basename(path)} skip {guess}`", "warn")
+        except Exception:
+            if not skip and guess:           # smart-import: auto-skip the junk header
+                cols = _read(guess)
+                skip = guess
+                _say(f"  detected + auto-skipped {guess} preamble line(s)  "
+                     f"(reload with `skip 0` to keep them)", "warn")
+            else:
+                raise
     except Exception as e:
         _say(f"  Error: couldn't load {os.path.basename(path)}  ({e})", "err")
         return
-    st.input, st.cols, st.steps, st.source_format = path, cols, [], fmt
+    st.input, st.cols, st.steps = path, cols, []
+    st.source_format, st.skip = fmt, skip
     ncols = len(cols)
-    _say(f"\n  loaded  {os.path.basename(path)}   ({ncols} columns)", "ok")
+    extra = f", skipped {skip} preamble" if skip else ""
+    _say(f"\n  loaded  {os.path.basename(path)}   ({ncols} columns{extra})", "ok")
     _say("  columns:  " + ", ".join(cols[:12]) + (" ..." if ncols > 12 else ""), "dim")
     _say("  tip: build a pipeline - filter / keep / dedup ... each previews live\n", "dim")
 
@@ -375,6 +414,40 @@ def h_stats(st, arg):
     for r in rows:
         print("  " + "  ".join(_s(r[idx[j]]).ljust(widths[j]) for j in range(len(show))))
     print()
+
+
+def h_plot(st, arg):
+    if _need_input(st):
+        return
+    a = _split_args(arg)
+    if not a:
+        _say("  usage: plot <column> [by <cat>] [agg sum|count|avg|min|max] [bins N] [top N]", "warn")
+        _say("  e.g.   plot amount by city      |      plot amount bins 15", "dim")
+        return
+    column = a[0]
+    opts = {"by": None, "agg": None, "bins": 20, "top": 20, "width": 48}
+    i = 1
+    while i < len(a):
+        key = a[i].lower()
+        if key in ("by", "agg", "bins", "top", "width") and i + 1 < len(a):
+            val = a[i + 1]
+            if key in ("bins", "top", "width"):
+                try:
+                    opts[key] = int(val)
+                except ValueError:
+                    pass
+            else:
+                opts[key] = val
+            i += 2
+        else:
+            i += 1
+    plot_from(st.con, f"({st.current_query()})", column, by=opts["by"], agg=opts["agg"],
+              bins=opts["bins"], top=opts["top"], width=opts["width"])
+
+
+def h_history(st, arg):
+    n = int(arg) if arg.strip().isdigit() else 20
+    history(n=n)
 
 
 def _add_step(st, cmd, arg, preview=True):
@@ -795,7 +868,8 @@ def h_clear(st, arg):
 
 HANDLERS = {
     "load": h_load, "peek": h_peek, "show": h_peek, "schema": h_schema,
-    "count": h_count, "stats": h_stats, "steps": h_steps, "pipeline": h_steps,
+    "count": h_count, "stats": h_stats, "plot": h_plot, "history": h_history,
+    "steps": h_steps, "pipeline": h_steps,
     "undo": h_undo, "reset": h_reset, "sql": h_sql, "eject": h_eject,
     "save": h_save, "run": h_run, "pwd": h_pwd, "cd": h_cd,
     "check": h_check, "validate": h_validate, "join": h_join, "diff": h_diff,

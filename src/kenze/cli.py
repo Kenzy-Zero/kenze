@@ -14,11 +14,13 @@ from .ops import (
     check,
     diff,
     eject,
+    history,
     init,
     join,
     partition,
     peek,
     pivot,
+    plot,
     profile,
     run_spec,
     run_sql,
@@ -36,7 +38,7 @@ _GLOBAL_DEFAULTS = {
     "memory_limit": None, "temp_dir": None, "no_disk_check": False,
     "skip_bad_lines": False, "log": None, "quiet": False,
     "dry_run": False, "errors": None, "append": False, "source_format": None,
-    "threads": None,
+    "threads": None, "skip": 0, "no_history": False,
 }
 
 
@@ -52,6 +54,10 @@ def _add_globals(parser):
                    help="skip the pre-flight free-space check")
     g.add_argument("--skip-bad-lines", action="store_true", default=s,
                    help="ignore malformed rows in CSV input")
+    g.add_argument("--skip", type=int, metavar="N", default=s,
+                   help="skip N preamble rows before the CSV header (messy exports)")
+    g.add_argument("--no-history", action="store_true", default=s,
+                   help="don't record this run in ~/.kenze/history.jsonl")
     g.add_argument("--errors", metavar="PATH", default=s,
                    help="quarantine malformed CSV rows to this file instead of failing")
     g.add_argument("--append", action="store_true", default=s,
@@ -91,6 +97,14 @@ def build_parser():
     sp.add_argument("input")
     sp.add_argument("--n", type=int, default=20)
     cmd("stats", help="per-column summary (min/max/nulls/unique)").add_argument("input")
+    sp = cmd("plot", help="quick ASCII chart of a column (histogram / bar chart)")
+    sp.add_argument("input")
+    sp.add_argument("column", help="the column to chart")
+    sp.add_argument("--by", help="category column: chart agg(column) per value")
+    sp.add_argument("--agg", help="sum | count | avg | min | max | median (default: sum)")
+    sp.add_argument("--bins", type=int, default=20, help="histogram bins (numeric, no --by)")
+    sp.add_argument("--top", type=int, default=20, help="max bars to show")
+    sp.add_argument("--width", type=int, default=48, help="bar width in characters")
     cmd("check", help="pre-flight file-integrity scan").add_argument("input")
     sp = cmd("validate", help="check a file against a target schema json")
     sp.add_argument("input")
@@ -188,6 +202,9 @@ def build_parser():
     sp.add_argument("path", nargs="?", default="recipe.dq")
     sp.add_argument("--input", dest="init_input", help="a data file to pre-fill columns from")
 
+    sp = cmd("history", help="show recent kenze runs (input -> output, rows, time)")
+    sp.add_argument("--n", type=int, default=20, help="how many recent runs to show")
+
     cmd("recipe", help="show the recipe (.dq) format and every valid step")
     cmd("shell", help="interactive session: / command menu, live previews, build a recipe")
     return p
@@ -210,6 +227,8 @@ def _spec_globals(a, spec):
         spec["append"] = True
     if a.source_format:
         spec["source_format"] = a.source_format
+    if a.skip:
+        spec["skip"] = a.skip
     return spec
 
 
@@ -220,7 +239,7 @@ def _run(a, spec):
         if not a.dry_run:
             print(f"-> {a.cmd}")
         run_spec(spec, con=con, quiet=a.quiet, disk_check=not a.no_disk_check,
-                 log=a.log, dry_run=a.dry_run)
+                 log=a.log, dry_run=a.dry_run, action=a.cmd)
     finally:
         con.close()
 
@@ -230,13 +249,18 @@ def _inspect(a):
     if a.cmd == "recipe":
         print(REFERENCE)
     elif a.cmd == "profile":
-        profile(a.input, fmt=a.source_format)
+        profile(a.input, fmt=a.source_format, skip=a.skip or 0)
     elif a.cmd == "peek":
-        peek(a.input, n=a.n, fmt=a.source_format)
+        peek(a.input, n=a.n, fmt=a.source_format, skip=a.skip or 0)
     elif a.cmd == "stats":
-        stats(a.input, fmt=a.source_format)
+        stats(a.input, fmt=a.source_format, skip=a.skip or 0)
+    elif a.cmd == "plot":
+        plot(a.input, a.column, by=a.by, agg=a.agg, bins=a.bins, top=a.top,
+             width=a.width, fmt=a.source_format)
     elif a.cmd == "check":
         check(a.input)
+    elif a.cmd == "history":
+        history(n=a.n)
     elif a.cmd == "validate":
         if validate(a.input, a.schema):
             sys.exit(1)
@@ -342,6 +366,9 @@ def main(argv=None):
     for k, v in _GLOBAL_DEFAULTS.items():   # backfill SUPPRESS'd globals
         if not hasattr(a, k):
             setattr(a, k, v)
+    if getattr(a, "no_history", False):
+        import os
+        os.environ["KENZE_NO_HISTORY"] = "1"
     try:
         _dispatch(a)
     except (ValueError, FileNotFoundError, OSError, duckdb.Error) as e:
