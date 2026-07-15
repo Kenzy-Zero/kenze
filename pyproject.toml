@@ -34,7 +34,7 @@ classifiers = [
 #  - psutil: the never-OOM memory sizing (the headline feature).
 #  - prompt_toolkit: the interactive shell (`kenze` with no args) - the way most
 #    people will use kenze, so it ships by default, not behind an extra.
-dependencies = ["duckdb>=0.10", "psutil>=5.9", "prompt_toolkit>=3.0"]
+dependencies = ["duckdb>=1.2", "psutil>=5.9", "prompt_toolkit>=3.0"]
 
 [project.optional-dependencies]
 # hand cleaned data straight to a fast in-memory dataframe (kenze.to_polars / to_arrow / to_df)

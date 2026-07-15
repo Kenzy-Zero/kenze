@@ -111,7 +111,8 @@ half-written output file behind.
 ### Requirements
 
 - Python 3.9 or newer
-- The dependencies `duckdb` and `psutil`, installed automatically
+- The dependencies `duckdb` (1.2 or newer), `psutil` and `prompt_toolkit`,
+  installed automatically
 
 ### Standard install
 

@@ -362,7 +362,8 @@ def h_load(st, arg):
             else:
                 raise
     except Exception as e:
-        _say(f"  Error: couldn't load {os.path.basename(path)}  ({e})", "err")
+        shown = os.path.basename(path.rstrip("/\\")) or path
+        _say(f"  Error: couldn't load {shown}  ({e})", "err")
         return
     st.input, st.cols, st.steps = path, cols, []
     st.source_format, st.skip = fmt, skip

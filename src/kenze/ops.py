@@ -50,6 +50,19 @@ def _source(path: str, skip_bad: bool = False, fmt: str = None,
     if fmt == "iceberg":
         return f"iceberg_scan({p})"
 
+    # clear errors for a local path that isn't a readable file (a folder, or a
+    # typo) instead of DuckDB's cryptic "Table with name ... does not exist".
+    if path not in ("", "-") and not is_remote(path) and not _is_glob(path):
+        if os.path.isdir(path):
+            clean = path.rstrip("/\\") or path
+            raise ValueError(
+                f"'{path}' is a folder, not a data file. Point at a file "
+                f"(e.g. {clean}/data.csv), a glob (e.g. {clean}/*.csv), or use "
+                f"--source-format delta|iceberg for a lakehouse table."
+            )
+        if not os.path.exists(path):
+            raise ValueError(f"no such file: {path}")
+
     e = _ext(path)
     if e in (".xlsx", ".xls"):
         return f"read_xlsx({p})"
@@ -1197,7 +1210,7 @@ def split(input_path, by, out_dir, fmt="csv", con=None, max_groups=2000):
     con = con or connect()
     try:
         ensure_remote(con, input_path)
-        ensure_excel(con, input_path)
+        ensure_excel(con, input_path, f"_.{str(fmt).lower().lstrip('.')}")
         src = _source(input_path)
         cols = columns(con, src)
         match = [c for c in cols if c.lower() == by.lower()]

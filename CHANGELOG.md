@@ -25,6 +25,12 @@ All notable changes to kenze are recorded here. The format is based on
   shows recent runs (input → output, rows, time). Disable with `--no-history` or
   `KENZE_NO_HISTORY=1`.
 
+### Changed
+- Minimum DuckDB is now **1.2** (up from 0.10) — required for `read_xlsx`/Excel
+  write and the CSV `strict_mode` used by `--skip`.
+- Loading a folder or a non-existent path now gives a clear message ("that's a
+  folder, point at a file …") instead of a cryptic DuckDB catalog error.
+
 ## [0.6.1] - 2026-07-15
 
 ### Fixed
