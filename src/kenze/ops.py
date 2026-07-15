@@ -68,6 +68,17 @@ def _source(path: str, skip_bad: bool = False, fmt: str = None,
         return f"read_xlsx({p})"
 
     glob = _is_glob(path)
+    # a recognisable-but-unsupported file type (.md, .pdf, .docx ...) -> a clear
+    # message that names the formats we DO read (incl. Excel), instead of DuckDB's
+    # raw "No extension found capable of reading the file" binder error.
+    _READABLE = (".csv", ".tsv", ".txt", ".parquet", ".pq", ".json", ".ndjson")
+    if e and e not in _READABLE and not is_remote(path):
+        raise ValueError(
+            f"kenze doesn't read '{e}' files. Supported formats: CSV, TSV, Parquet, "
+            f"JSON and Excel (.xlsx) - plus their .gz variants. If "
+            f"'{os.path.basename(path)}' is really delimited text, rename it .csv."
+        )
+
     is_csvish = e in ("", ".csv", ".tsv", ".txt", ".gz")
 
     if is_csvish and (errors or skip_bad or glob or skip):
