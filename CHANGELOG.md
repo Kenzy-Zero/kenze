@@ -4,6 +4,13 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-07-15
+
+### Fixed
+- **Docs links** — `SHELL.md` references in the README are now absolute GitHub URLs
+  so they resolve correctly on the PyPI project page (relative links 404'd there).
+- Housekeeping on the `LICENSE` file (copyright line); no functional change.
+
 ## [0.6.0] - 2026-07-15
 
 ### Added

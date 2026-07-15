@@ -37,7 +37,7 @@ kenze > run clean.csv               # done: 41,files streamed, no OOM
 
 It never loads more than it needs, so counts and previews on a 60-million-row file
 come back in well under a second, and full writes stream through DuckDB with a
-progress bar. Everything the CLI can do is in the shell — see **[SHELL.md](SHELL.md)**.
+progress bar. Everything the CLI can do is in the shell — see **[SHELL.md](https://github.com/Kenzy-Zero/kenze/blob/main/SHELL.md)**.
 
 ## Feature highlights
 
@@ -175,7 +175,7 @@ tbl = kenze.to_arrow("SELECT city, count(*) FROM 'big.parquet' GROUP BY 1")   # 
 
 Run any of these as a one-liner, or run `kenze` and do it all interactively — the
 shell wraps every command above plus session helpers (`open`, `set`, `dryrun`,
-`pwd`/`cd`, `undo`, `steps`). See **[SHELL.md](SHELL.md)** for the shell guide.
+`pwd`/`cd`, `undo`, `steps`). See **[SHELL.md](https://github.com/Kenzy-Zero/kenze/blob/main/SHELL.md)** for the shell guide.
 
 ## Where it stops (on purpose)
 
