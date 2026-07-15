@@ -4,6 +4,20 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] - 2026-07-15
+
+### Improved (interactive shell — argument handling)
+- **`plot` accepts a bare category** — `plot amount city` now works the same as
+  `plot amount by city` (you no longer have to type `by`). It also **warns**
+  instead of silently ignoring a bad `bins`/`top` value or leftover words.
+- **Friendlier `filter`** — a natural, non-SQL condition like `filter status active`
+  or `filter city = new york` is auto-repaired to valid SQL (`status = 'active'`) and
+  the shell tells you how it read it. Real SQL (`amount > 100`) is untouched, and a
+  condition it can't safely repair still shows the error and the quoting hint.
+- **No more silent argument dropping** — `peek`/`history` warn on a non-numeric
+  count, and `join`/`diff`/`pivot`/`unpivot`/`split`/`partition` warn about extra
+  positional arguments instead of quietly ignoring them.
+
 ## [0.7.0] - 2026-07-15
 
 ### Added

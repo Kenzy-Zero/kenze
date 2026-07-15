@@ -60,7 +60,7 @@ clears them all (the file stays loaded), and loading a new file starts fresh.
 | `schema` | the current columns and their types |
 | `count` | how many rows the current pipeline produces |
 | `stats` | per-column summary: min / max / nulls / approx-unique |
-| `plot <col> [by <cat>]` | an ascii chart of the **live pipeline**: `plot amount` (histogram / value-counts) or `plot amount by city` (bar chart). Options: `agg sum\|count\|avg\|...`, `bins N`, `top N` |
+| `plot <col> [by <cat>]` | an ascii chart of the **live pipeline**: `plot amount` (histogram / value-counts), or `plot amount by city` / `plot amount city` (bar chart of an aggregate per category). Options: `agg sum\|count\|avg\|...`, `bins N`, `top N` |
 | `check [file]` | integrity scan: readable? how many malformed rows? |
 | `validate <schema.json> [file]` | check the file against a target schema |
 
@@ -155,8 +155,16 @@ A filter condition is plain SQL, so two rules trip people up:
        filter amount >= 100
        filter status = 'active' and amount > 0
 
+If you type a simple, non-SQL condition like `filter status active` or
+`filter city = london`, the shell tries to **auto-repair** it to valid SQL
+(`status = 'active'`) and tells you how it read it — so a natural attempt still
+works. It only steps in when the condition would otherwise error, and never
+touches real SQL. Text matches are exact and case-sensitive, so `london` won't
+match `London`.
+
 Not sure how a value is spelled? Run `peek` or `stats` first to see the real
-values. Every filter also runs as its own step, so you can stack several.
+values. Every filter also runs as its own step, so you can stack several — filter
+a few times, then `plot` or `run` charts/writes only the rows that survive.
 
 ---
 

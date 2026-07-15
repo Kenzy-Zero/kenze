@@ -26,6 +26,7 @@ from . import __version__
 from .engine import connect
 from .ops import (
     _clip,
+    _ident,
     _load_source_ext,
     _s,
     build_query,
@@ -377,8 +378,10 @@ def h_load(st, arg):
 def h_peek(st, arg):
     if _need_input(st):
         return
-    n = int(arg) if arg.strip().isdigit() else 10
-    _print_table(st, st.current_query(), n)
+    s = arg.strip()
+    if s and not s.isdigit():
+        _say(f"  peek takes a row count, e.g. `peek 20` - ignoring '{s}', showing 10", "warn")
+    _print_table(st, st.current_query(), int(s) if s.isdigit() else 10)
 
 
 def h_schema(st, arg):
@@ -417,38 +420,101 @@ def h_stats(st, arg):
     print()
 
 
+_PLOT_KEYS = ("by", "agg", "bins", "top", "width")
+_PLOT_NUM = ("bins", "top", "width")
+
+
 def h_plot(st, arg):
     if _need_input(st):
         return
     a = _split_args(arg)
     if not a:
         _say("  usage: plot <column> [by <cat>] [agg sum|count|avg|min|max] [bins N] [top N]", "warn")
-        _say("  e.g.   plot amount by city      |      plot amount bins 15", "dim")
+        _say("  e.g.   plot amount by city   |   plot amount city   |   plot amount bins 15", "dim")
         return
     column = a[0]
     opts = {"by": None, "agg": None, "bins": 20, "top": 20, "width": 48}
+    unknown = []
     i = 1
     while i < len(a):
         key = a[i].lower()
-        if key in ("by", "agg", "bins", "top", "width") and i + 1 < len(a):
+        if key in _PLOT_KEYS:
+            if i + 1 >= len(a):
+                _say(f"  '{key}' needs a value (e.g. {key} ...) - ignoring it", "warn")
+                break
             val = a[i + 1]
-            if key in ("bins", "top", "width"):
+            if key in _PLOT_NUM:
                 try:
                     opts[key] = int(val)
                 except ValueError:
-                    pass
+                    _say(f"  {key} must be a whole number, not '{val}' - using {opts[key]}", "warn")
             else:
                 opts[key] = val
             i += 2
-        else:
+        elif opts["by"] is None:
+            opts["by"] = a[i]          # a bare second column = the category (implicit `by`)
             i += 1
+        else:
+            unknown.append(a[i])
+            i += 1
+    if unknown:
+        _say(f"  ignored: {', '.join(unknown)}   (usage: plot <col> [by <cat>] "
+             f"[agg sum|count|avg|min|max] [bins N] [top N])", "warn")
     plot_from(st.con, f"({st.current_query()})", column, by=opts["by"], agg=opts["agg"],
               bins=opts["bins"], top=opts["top"], width=opts["width"])
 
 
 def h_history(st, arg):
-    n = int(arg) if arg.strip().isdigit() else 20
-    history(n=n)
+    s = arg.strip()
+    if s and not s.isdigit():
+        _say(f"  history takes a count, e.g. `history 50` - ignoring '{s}', showing 20", "warn")
+    history(n=int(s) if s.isdigit() else 20)
+
+
+_FILTER_OPS = ("!=", "<>", ">=", "<=", "==", "=", ">", "<")
+
+
+def _looks_ready(v):
+    """A value that's already valid SQL as-is: a quoted string or a number."""
+    v = v.strip()
+    if len(v) >= 2 and v[0] in "'\"" and v[-1] == v[0]:
+        return True
+    try:
+        float(v)
+        return True
+    except ValueError:
+        return False
+
+
+def _repair_filter(cols, arg):
+    """Turn a non-SQL filter (`status active`, `city = new york`) into valid SQL
+    (`status = 'active'`), but ONLY for the simple <column> [op] <value> shape - so
+    a non-SQL user's natural attempt works. Returns None if it doesn't fit."""
+    parts = arg.strip().split(None, 1)
+    if not parts:
+        return None
+    col = parts[0].strip('"').strip("'")
+    match = [c for c in cols if c.lower() == col.lower()]
+    if not match:                       # first word isn't a column -> leave it alone
+        return None
+    rest = parts[1].strip() if len(parts) > 1 else ""
+    if not rest:
+        return None
+    op = "="
+    for o in _FILTER_OPS:               # an explicit operator?  (status = active)
+        if rest.startswith(o):
+            op, rest = ("=" if o == "==" else o), rest[len(o):].strip()
+            break
+    if not rest:
+        return None
+    value = rest if _looks_ready(rest) else "'" + rest.replace("'", "''") + "'"
+    return f"{_ident(match[0])} {op} {value}"
+
+
+def _run_step(st):
+    """Count rows for the current pipeline (validates the last step builds)."""
+    st.refresh_cols()
+    return st.con.execute(f"SELECT count(*) FROM ({st.current_query()}) _c").fetchone()[0]
 
 
 def _add_step(st, cmd, arg, preview=True):
@@ -459,15 +525,28 @@ def _add_step(st, cmd, arg, preview=True):
         return
     st.steps.append((cmd, arg or "all"))
     try:
-        st.refresh_cols()
-        rows = st.con.execute(
-            f"SELECT count(*) FROM ({st.current_query()}) _c").fetchone()[0]
+        rows = _run_step(st)
     except Exception as e:
         st.steps.pop()          # bad step: roll it back, no harm done
-        _say(f"  Error: {e}", "err")
+        # friendly filter: if a non-SQL condition failed, try to repair it
         if cmd == "filter":
+            fixed = _repair_filter(st.cols, arg)
+            if fixed and fixed != arg.strip():
+                st.steps.append(("filter", fixed))
+                try:
+                    rows = _run_step(st)
+                    _say_parts([("ok", f"  + filter {fixed}"),
+                                ("dim", f"    (read `{arg}` as text)  -> {rows:,} rows")])
+                    if preview and st.auto_preview:
+                        _print_table(st, st.current_query(), 6)
+                    return
+                except Exception:
+                    st.steps.pop()      # the repair didn't work either
+            _say(f"  Error: {e}", "err")
             _say("  hint: text needs single quotes, use = to compare  ->  "
                  "filter city = 'Dubai'   (numbers: age > 30)", "dim")
+            return
+        _say(f"  Error: {e}", "err")
         return
     _say_parts([("ok", f"  + {cmd} {arg}"), ("dim", f"    -> {rows:,} rows")])
     if preview and st.auto_preview:
@@ -634,6 +713,12 @@ def h_validate(st, arg):
     validate(path, schema, con=st.con)
 
 
+def _warn_extra(a, used, cmd):
+    """Flag positional args beyond what a command consumes (don't silently drop)."""
+    if len(a) > used:
+        _say(f"  ignored extra: {', '.join(a[used:])}   (see `help` -> {cmd})", "warn")
+
+
 def h_join(st, arg):
     if _need_input(st):
         return
@@ -644,6 +729,7 @@ def h_join(st, arg):
         return
     right, key, out = a[0], a[1], _out(a[2])
     how = a[3] if len(a) > 3 else "inner"
+    _warn_extra(a, 4, "join")
     _pending_note(st)
     _say(f"  join {os.path.basename(st.input)} + {os.path.basename(right)} on {key} ({how})", "accent")
     join(st.input, right, key, how=how, out=out, con=st.con)
@@ -659,6 +745,7 @@ def h_diff(st, arg):
         return
     other, key = a[0], a[1]
     out = _out(a[2]) if len(a) > 2 else None
+    _warn_extra(a, 3, "diff")
     _pending_note(st)
     diff(st.input, other, key, out=out, con=st.con)
 
@@ -673,6 +760,7 @@ def h_pivot(st, arg):
         return
     on, values, out = a[0], a[1], _out(a[2])
     agg = a[3] if len(a) > 3 else "sum"
+    _warn_extra(a, 4, "pivot")
     _pending_note(st)
     pivot(st.input, on, values, agg=agg, out=out, con=st.con)
 
@@ -686,6 +774,7 @@ def h_unpivot(st, arg):
         _say("  e.g.   unpivot jan,feb,mar long.csv", "dim")
         return
     cols, out = a[0], _out(a[1])
+    _warn_extra(a, 2, "unpivot")
     _pending_note(st)
     unpivot(st.input, cols, out=out, con=st.con)
 
@@ -700,6 +789,7 @@ def h_split(st, arg):
         return
     by, out_dir = a[0], os.path.abspath(a[1])
     fmt = a[2] if len(a) > 2 else "csv"
+    _warn_extra(a, 3, "split")
     _pending_note(st)
     split(st.input, by, out_dir, fmt=fmt, con=st.con)
 
@@ -714,6 +804,7 @@ def h_partition(st, arg):
         return
     by, out_dir = a[0], os.path.abspath(a[1])
     fmt = a[2] if len(a) > 2 else "parquet"
+    _warn_extra(a, 3, "partition")
     _pending_note(st)
     partition(st.input, by, out_dir, fmt=fmt, con=st.con, quiet=False)
 

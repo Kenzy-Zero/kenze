@@ -2,7 +2,7 @@
 
 Big-file data preparation that never runs out of memory. No SQL required.
 
-Version 0.7.0
+Version 0.7.1
 
 ---
 
