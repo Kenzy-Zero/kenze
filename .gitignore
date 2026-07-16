@@ -26,5 +26,13 @@ feedback.txt
 .env
 *token*.txt
 
-# local screenshots / scratch
+# local screenshots / scratch images - NEVER commit (may show local paths / data)
 Screenshot*.png
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+
+# marketing drafts (not for the public repo)
+LAUNCH_POSTS.md
