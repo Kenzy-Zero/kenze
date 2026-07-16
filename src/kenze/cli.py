@@ -26,6 +26,7 @@ from .ops import (
     run_sql,
     split,
     stats,
+    traintest,
     unpivot,
     validate,
 )
@@ -131,6 +132,29 @@ def build_parser():
     sp.add_argument("--cols", required=True)
     sp.add_argument("--method", default="hash")
 
+    # ML-prep (model-ready)
+    sp = cmd("scale", help="scale numeric columns for ML (minmax / zscore)")
+    _io(sp)
+    sp.add_argument("--cols", required=True, help="comma-separated numeric columns")
+    sp.add_argument("--method", default="minmax", help="minmax | zscore")
+    sp = cmd("bin", help="bucket numeric columns into N bins (adds col_bin)")
+    _io(sp)
+    sp.add_argument("--cols", required=True, help="comma-separated numeric columns")
+    sp.add_argument("--into", type=int, default=5, help="number of bins (default 5)")
+    sp.add_argument("--method", default="uniform", help="uniform | quantile")
+    sp = cmd("encode", help="label-encode categorical columns to integers (0-based)")
+    _io(sp)
+    sp.add_argument("--cols", required=True, help="comma-separated columns")
+    sp = cmd("onehot", help="one-hot encode categorical columns to 0/1 indicator columns")
+    _io(sp)
+    sp.add_argument("--cols", required=True, help="comma-separated columns")
+    sp.add_argument("--max", type=int, default=50, dest="maxcat",
+                    help="keep the top-N values as columns, rest -> col_other (default 50)")
+    sp = cmd("clip-outliers", help="cap extreme values (winsorize) via IQR or percentile")
+    _io(sp)
+    sp.add_argument("--cols", required=True, help="comma-separated numeric columns")
+    sp.add_argument("--method", default="iqr", help="iqr (Tukey 1.5) | pct (1st-99th)")
+
     # row ops
     sp = cmd("filter", help="keep rows matching a SQL condition")
     _io(sp)
@@ -172,6 +196,14 @@ def build_parser():
     sp.add_argument("--by", required=True, help="column(s)")
     sp.add_argument("-o", "--output", required=True, help="output DIRECTORY")
     sp.add_argument("--format", default="parquet", help="parquet | csv")
+    sp = cmd("traintest", help="split into train/test files (random or time-based)")
+    sp.add_argument("input")
+    sp.add_argument("-o", "--output", required=True, help="output DIRECTORY")
+    sp.add_argument("--ratio", type=float, default=0.8, help="train fraction (default 0.8)")
+    sp.add_argument("--seed", type=int, default=42, help="random seed (reproducible)")
+    sp.add_argument("--by", help="time column for a leak-free time-based split")
+    sp.add_argument("--before", help="rows with by < before -> train, else test")
+    sp.add_argument("--format", default="parquet", help="parquet | csv | json")
     sp = cmd("pivot", help="reshape long -> wide (values of a column become columns)")
     sp.add_argument("input")
     sp.add_argument("--on", required=True, help="column whose values become new columns")
@@ -277,6 +309,10 @@ def _combine(a):
         split(a.input, a.by, a.output, fmt=a.format)
     elif a.cmd == "partition":
         partition(a.input, a.by, a.output, fmt=a.format, con=_con(a), quiet=a.quiet)
+    elif a.cmd == "traintest":
+        print("-> traintest")
+        traintest(a.input, a.output, ratio=a.ratio, seed=a.seed, by=a.by,
+                  before=a.before, fmt=a.format, con=_con(a), quiet=a.quiet)
     elif a.cmd == "pivot":
         print("-> pivot")
         pivot(a.input, a.on, a.values, agg=a.agg, group=a.group, out=a.output,
@@ -339,6 +375,20 @@ def _transform(a):
     if a.cmd == "mask":
         spec["mask"] = a.cols
         spec["mask_method"] = a.method
+    elif a.cmd == "scale":
+        cols = [c.strip() for c in a.cols.split(",") if c.strip()]
+        spec["scale"] = ", ".join(f"{c}:{a.method}" for c in cols)
+    elif a.cmd == "bin":
+        cols = [c.strip() for c in a.cols.split(",") if c.strip()]
+        spec["bin"] = ", ".join(f"{c}:{a.into}:{a.method}" for c in cols)
+    elif a.cmd == "encode":
+        spec["encode"] = ", ".join(c.strip() for c in a.cols.split(",") if c.strip())
+    elif a.cmd == "onehot":
+        cols = [c.strip() for c in a.cols.split(",") if c.strip()]
+        spec["onehot"] = ", ".join(f"{c}:{a.maxcat}" for c in cols)
+    elif a.cmd == "clip-outliers":
+        cols = [c.strip() for c in a.cols.split(",") if c.strip()]
+        spec["clip_outliers"] = ", ".join(f"{c}:{a.method}" for c in cols)
     elif a.cmd in _TRANSFORMS:
         attr, key = _TRANSFORMS[a.cmd]
         spec[key] = getattr(a, attr)

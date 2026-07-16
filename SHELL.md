@@ -74,6 +74,11 @@ clears them all (the file stays loaded), and loading a new file starts fresh.
 | `cast <col:TYPE>` | `cast zip:VARCHAR` | change a column's type (e.g. keep leading zeros) |
 | `fillna <col:value>` | `fillna city:Unknown` | replace nulls in a column |
 | `mask <cols>` | `mask email, ssn` | one-way hash sensitive columns |
+| `scale <col> [minmax\|zscore]` | `scale amount minmax` | scale a numeric column for ML |
+| `bin <col> [N] [uniform\|quantile]` | `bin age 5` | bucket a numeric column into N bins (adds `col_bin`) |
+| `encode <col>` | `encode city` | label-encode a category to 0-based integers |
+| `onehot <col> [N]` | `onehot city 20` | one-hot encode to 0/1 columns (top-N + `_other`) |
+| `clip-outliers <col> [iqr\|pct]` | `clip-outliers amount iqr` | cap extreme values (winsorize) |
 | `dedup [cols]` | `dedup id` | drop duplicate rows (a column, or `dedup` for whole-row) |
 | `clip <bbox>` | `clip 54,24,56,26` | keep rows inside a lon/lat box (min_lon,min_lat,max_lon,max_lat) |
 | `sample <n>` | `sample 1000` | keep N random rows |
@@ -91,6 +96,7 @@ have pending pipeline steps, run or save them first to apply them.
 | `unpivot <cols> <out>` | `unpivot jan,feb,mar long.csv` | reshape wide to long |
 | `split <by> <dir> [fmt]` | `split city cities/` | one file per distinct value of a column |
 | `partition <by> <dir> [fmt]` | `partition year,month data/` | hive-style `col=value/` folders |
+| `traintest <dir> [ratio R] [seed N] [by <col> before <val>]` | `traintest splits/ ratio 0.8` | split into train/test files (random or time-based) |
 
 ### Data-quality guards
 Declare checks that run **before** anything is written - if a check fails, `run`
@@ -144,10 +150,10 @@ A filter condition is plain SQL, so two rules trip people up:
 
 1. **Text values need single quotes**, and the match is exact / case-sensitive:
 
-       filter city = 'Dubai'          correct
-       filter city = 'dubai'          finds nothing if the data says "Dubai"
-       filter city = Dubai            error: "Dubai" is read as a column name
-       filter city = "Dubai"          error: double quotes mean a column in SQL
+       filter city = 'London'         correct
+       filter city = 'london'         finds nothing if the data says "London"
+       filter city = London           error: "London" is read as a column name
+       filter city = "London"         error: double quotes mean a column in SQL
 
 2. **Numbers need no quotes**, and you can combine conditions:
 

@@ -25,6 +25,7 @@ _REQUIRED = ("input", "output")
 KNOWN_KEYS = {
     "input", "output", "keep", "drop", "filter", "bbox",
     "types", "fillna", "mask", "mask_method", "rename",
+    "scale", "bin", "encode", "onehot", "clip_outliers",
     "dedup", "sample", "head",
     "assert", "assert_unique", "assert_not_null",
 }
@@ -49,6 +50,11 @@ Steps (use only the ones you need, in any order):
   mask:     email, ssn                    mask sensitive columns (see mask_method)
   mask_method: hash                       hash (default) | redact | null
   rename:   old:new, amount:total         rename columns
+  scale:    amount:minmax, age:zscore     scale numeric columns for ML (minmax | zscore)
+  bin:      age:5, income:4:quantile      bucket a numeric column into N bins (adds col_bin)
+  encode:   city, level                   label-encode categories to integers (0-based, alphabetical)
+  onehot:   city, brand:20                 one-hot encode categories to 0/1 columns (top-N + _other; default 50)
+  clip_outliers: amount:iqr, age:pct       cap extreme values / winsorize (iqr = Tukey 1.5 | pct = 1st-99th)
   dedup:    id                            drop duplicate rows (a column name, or: all)
   sample:   50000                         keep N random rows
   head:     100                           keep the first N rows

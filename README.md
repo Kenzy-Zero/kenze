@@ -44,7 +44,8 @@ progress bar. Everything the CLI can do is in the shell — see **[SHELL.md](htt
 
 - **An interactive shell** (`kenze`) with a `/` command menu, live previews, schema-aware autocomplete, and data-quality guards — plus the same as a one-line CLI for scripts and cron.
 - **Process files bigger than your RAM** without crashing — memory is auto-capped and DuckDB spills to disk.
-- **32 CLI commands** for the everyday work: `keep`, `drop`, `filter`, `rename`, `cast`, `fillna`, `dedup`, `sample`, `join`, `diff`, `pivot`, `split`, `partition`, and more — no SQL needed.
+- **38 CLI commands** for the everyday work: `keep`, `drop`, `filter`, `rename`, `cast`, `fillna`, `dedup`, `sample`, `join`, `diff`, `pivot`, `split`, `partition`, and more — no SQL needed.
+- **Model-ready in one step** — `scale`, `bin`, `encode`, `onehot`, `clip-outliers`, and a reproducible `traintest` split turn a clean file into a model-ready dataset you hand straight to scikit-learn / XGBoost.
 - **See your data** — `plot amount --by city` draws an ASCII bar chart or histogram right in the terminal, so you spot skew and dirty data instantly.
 - **Excel in and out** — read and write `.xlsx` workbooks natively (`convert big.parquet -o report.xlsx`), no extra dependency.
 - **Messy CSVs, handled** — `--skip N` drops junk preamble rows; the shell even auto-detects and skips them for you.
@@ -181,8 +182,9 @@ tbl = kenze.to_arrow("SELECT city, count(*) FROM 'big.parquet' GROUP BY 1")   # 
 ## Commands
 
 `profile` · `peek` · `stats` · `plot` · `check` · `validate` · `keep` · `drop` · `rename` · `cast` ·
-`fillna` · `mask` · `filter` · `dedup` · `sample` · `head` · `clip` · `convert` · `join` ·
-`diff` · `pivot` · `unpivot` · `split` · `partition` · `sql` · `eject` · `init` · `run` · `recipe` · `history`
+`fillna` · `mask` · `scale` · `bin` · `encode` · `onehot` · `clip-outliers` · `filter` · `dedup` ·
+`sample` · `head` · `clip` · `convert` · `join` · `diff` · `pivot` · `unpivot` · `split` ·
+`partition` · `traintest` · `sql` · `eject` · `init` · `run` · `recipe` · `history`
 
 Run any of these as a one-liner, or run `kenze` and do it all interactively — the
 shell wraps every command above plus session helpers (`open`, `set`, `dryrun`,

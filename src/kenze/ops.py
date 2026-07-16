@@ -182,6 +182,184 @@ def _wrap_replace(q: str, items):
     return f"SELECT * REPLACE ({clause}) FROM ({q}) _q"
 
 
+def _wrap_add(q: str, items):
+    """items = [(newcol, expr), ...] -> SELECT *, expr AS newcol FROM (q)."""
+    if not items:
+        return q
+    clause = ", ".join(f"{expr} AS {_ident(col)}" for col, expr in items)
+    return f"SELECT *, {clause} FROM ({q}) _q"
+
+
+# ------- ML-prep transforms (scale / bin): the last mile before you hand a
+# model-ready file to scikit-learn / XGBoost. Every one is pure DuckDB SQL - a
+# global-window aggregate computed in the same streaming plan - so no numpy /
+# scikit-learn dependency and the never-OOM guarantee still holds.
+
+_SCALE_ALIASES = {"minmax": "minmax", "zscore": "zscore",
+                  "standard": "zscore", "std": "zscore", "z": "zscore"}
+
+
+def _parse_scale(v):
+    """'amount:minmax, age:zscore' (bare 'amount' -> minmax) -> [(col, method)]."""
+    out = []
+    for item in _aslist(v):
+        col, _, meth = item.partition(":")
+        method = _SCALE_ALIASES.get((meth.strip() or "minmax").lower())
+        if not method:
+            raise ValueError(f"scale method must be minmax or zscore, got '{meth.strip()}'")
+        out.append((col.strip(), method))
+    return out
+
+
+def _scale_expr(col, method):
+    """minmax -> (x-min)/(max-min) in [0,1]; zscore -> (x-mean)/std (population,
+    matches sklearn StandardScaler). NULLIF guards a constant column (0 range)."""
+    c = _ident(col)
+    if method == "zscore":
+        return f"({c} - avg({c}) OVER ()) / NULLIF(stddev_pop({c}) OVER (), 0)"
+    return f"({c} - min({c}) OVER ()) / NULLIF(max({c}) OVER () - min({c}) OVER (), 0)"
+
+
+_BIN_ALIASES = {"uniform": "uniform", "equal": "uniform", "equal-width": "uniform",
+                "width": "uniform", "quantile": "quantile", "quantiles": "quantile",
+                "equal-freq": "quantile", "frequency": "quantile"}
+
+
+def _parse_bin(v):
+    """'age:5, income:4:quantile' (bare 'age' -> 5 uniform) -> [(col, nbins, method)]."""
+    out = []
+    for item in _aslist(v):
+        parts = [p.strip() for p in item.split(":")]
+        col = parts[0]
+        nbins = 5
+        if len(parts) > 1 and parts[1]:
+            try:
+                nbins = int(parts[1])
+            except ValueError:
+                raise ValueError(f"bin count must be a whole number, got '{parts[1]}'")
+        if nbins < 2:
+            raise ValueError("bin needs at least 2 bins")
+        method = _BIN_ALIASES.get((parts[2].lower() if len(parts) > 2 and parts[2] else "uniform"))
+        if not method:
+            raise ValueError("bin method must be uniform or quantile")
+        out.append((col, nbins, method))
+    return out
+
+
+def _bin_expr(col, n, method):
+    """A 1..N bin index. uniform = equal-width buckets; quantile = equal-count
+    (ntile). NULLs stay NULL; a constant column collapses to bin 1."""
+    c = _ident(col)
+    if method == "quantile":
+        return f"CASE WHEN {c} IS NULL THEN NULL ELSE ntile({n}) OVER (ORDER BY {c}) END"
+    lo, hi = f"min({c}) OVER ()", f"max({c}) OVER ()"
+    width = f"NULLIF(({hi} - {lo}) * 1.0 / {n}, 0)"
+    idx = f"CAST(floor(({c} - {lo}) / {width}) AS BIGINT) + 1"
+    return (f"CASE WHEN {c} IS NULL THEN NULL WHEN {hi} <= {lo} THEN 1 "
+            f"ELSE LEAST({n}, GREATEST(1, {idx})) END")
+
+
+def _parse_encode(v):
+    """'city, level' -> ['city', 'level']  (columns to label-encode)."""
+    return _aslist(v)
+
+
+def _encode_expr(col):
+    """Replace a category with a 0-based integer code in alphabetical order -
+    matches scikit-learn's LabelEncoder. NULLs stay NULL and sort out so the
+    codes stay contiguous 0..k-1."""
+    c = _ident(col)
+    null_last = f"(CASE WHEN {c} IS NULL THEN 1 ELSE 0 END)"
+    return (f"CASE WHEN {c} IS NULL THEN NULL "
+            f"ELSE DENSE_RANK() OVER (ORDER BY {null_last}, {c}) - 1 END")
+
+
+def _parse_onehot(v):
+    """'city, brand:20' (bare 'city' -> max 50) -> [(col, max_categories)]."""
+    out = []
+    for item in _aslist(v):
+        col, _, m = item.partition(":")
+        maxn = 50
+        if m.strip():
+            try:
+                maxn = int(m.strip())
+            except ValueError:
+                raise ValueError(f"onehot max must be a whole number, got '{m.strip()}'")
+        if maxn < 1:
+            raise ValueError("onehot max must be at least 1")
+        out.append((col.strip(), maxn))
+    return out
+
+
+def _onehot_wrap(con, q, col, maxn):
+    """Drop `col` and add a 0/1 indicator column per value. To stay memory-safe
+    on a high-cardinality column, only the top `maxn` values (by frequency) get
+    their own column; the rest fold into <col>_other. NULLs -> all zeros."""
+    ci = _ident(col)
+    vals = [r[0] for r in con.execute(
+        f"SELECT {ci} FROM ({q}) _oh WHERE {ci} IS NOT NULL "
+        f"GROUP BY 1 ORDER BY count(*) DESC, {ci} LIMIT {int(maxn)}"
+    ).fetchall()]
+    if not vals:
+        return q  # column is all-null / empty: leave it untouched
+    ndist = con.execute(
+        f"SELECT count(DISTINCT {ci}) FROM ({q}) _oh WHERE {ci} IS NOT NULL"
+    ).fetchone()[0]
+    inds, used = [], {}
+    for v in vals:
+        name = f"{col}_{_safe_name(v)}"
+        if name in used:
+            used[name] += 1
+            name = f"{name}_{used[name]}"
+        else:
+            used[name] = 0
+        inds.append((name, f"CASE WHEN {ci} = {_sql_literal(v)} THEN 1 ELSE 0 END"))
+    if ndist > len(vals):   # spilled categories -> one catch-all column
+        vlist = ", ".join(_sql_literal(v) for v in vals)
+        inds.append((f"{col}_other",
+                     f"CASE WHEN {ci} IS NOT NULL AND {ci} NOT IN ({vlist}) THEN 1 ELSE 0 END"))
+    clause = ", ".join(f"{expr} AS {_ident(n)}" for n, expr in inds)
+    return f"SELECT * EXCLUDE ({ci}), {clause} FROM ({q}) _q"
+
+
+_CLIPOUT_ALIASES = {"iqr": "iqr", "tukey": "iqr", "pct": "pct",
+                    "percentile": "pct", "quantile": "pct"}
+
+
+def _parse_clipout(v):
+    """'amount:iqr, age:pct' (bare 'amount' -> iqr) -> [(col, method)]."""
+    out = []
+    for item in _aslist(v):
+        col, _, m = item.partition(":")
+        method = _CLIPOUT_ALIASES.get((m.strip() or "iqr").lower())
+        if not method:
+            raise ValueError(f"clip-outliers method must be iqr or pct, got '{m.strip()}'")
+        out.append((col.strip(), method))
+    return out
+
+
+def _clipout_expr(con, q, col, method):
+    """Winsorize: cap a column's extreme values to a fence. iqr = Tukey's
+    [Q1 - 1.5*IQR, Q3 + 1.5*IQR]; pct = [1st, 99th] percentile. Bounds are read
+    once with approx_quantile (streaming, memory-safe) and inlined as literals."""
+    c = _ident(col)
+    if method == "pct":
+        lo, hi = con.execute(
+            f"SELECT approx_quantile({c}, 0.01), approx_quantile({c}, 0.99) FROM ({q}) _cq"
+        ).fetchone()
+    else:
+        q1, q3 = con.execute(
+            f"SELECT approx_quantile({c}, 0.25), approx_quantile({c}, 0.75) FROM ({q}) _cq"
+        ).fetchone()
+        if q1 is None or q3 is None:
+            return c
+        iqr = q3 - q1
+        lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    if lo is None or hi is None:
+        return c
+    return f"CASE WHEN {c} IS NULL THEN NULL ELSE LEAST({hi}, GREATEST({lo}, {c})) END"
+
+
 def build_query(con, spec) -> str:
     src = _source(spec["input"], skip_bad=spec.get("skip_bad_lines"),
                   fmt=spec.get("source_format"), errors=bool(spec.get("errors")),
@@ -238,6 +416,53 @@ def build_query(con, spec) -> str:
     if spec.get("rename"):
         pairs = ", ".join(f"{_ident(o)} AS {_ident(n)}" for o, n in _kv_pairs(spec["rename"]))
         q = f"SELECT * RENAME ({pairs}) FROM ({q}) _q"
+
+    # ML-prep: encode categories -> ints, scale numeric columns in place, add
+    # <col>_bin bucket columns. Resolved against the LIVE columns (so it works
+    # after keep/drop/rename); scale/bin are guarded to numeric columns (a clear
+    # message beats DuckDB's type-error wall).
+    if (spec.get("clip_outliers") or spec.get("encode") or spec.get("scale")
+            or spec.get("bin") or spec.get("onehot")):
+        desc = con.execute(f"DESCRIBE {q}").fetchall()
+        live = [r[0] for r in desc]
+        ltypes = {r[0]: r[1] for r in desc}
+
+        def _numcol(name):
+            col = _match_col(live, name)
+            if not _is_numeric_type(ltypes[col]):
+                raise ValueError(
+                    f"scale/bin/clip-outliers need a numeric column, but '{col}' is "
+                    f"{ltypes[col]} (cast it first, e.g. cast {col}:DOUBLE)"
+                )
+            return col
+
+        if spec.get("clip_outliers"):
+            items = []
+            for c, method in _parse_clipout(spec["clip_outliers"]):
+                col = _numcol(c)
+                items.append((col, _clipout_expr(con, q, col, method)))
+            q = _wrap_replace(q, items)
+        if spec.get("encode"):
+            items = []
+            for c in _parse_encode(spec["encode"]):
+                col = _match_col(live, c)
+                items.append((col, _encode_expr(col)))
+            q = _wrap_replace(q, items)
+        if spec.get("scale"):
+            items = []
+            for c, m in _parse_scale(spec["scale"]):
+                col = _numcol(c)
+                items.append((col, _scale_expr(col, m)))
+            q = _wrap_replace(q, items)
+        if spec.get("bin"):
+            adds = []
+            for c, n, m in _parse_bin(spec["bin"]):
+                col = _numcol(c)
+                adds.append((col + "_bin", _bin_expr(col, n, m)))
+            q = _wrap_add(q, adds)
+        if spec.get("onehot"):
+            for cname, maxn in _parse_onehot(spec["onehot"]):
+                q = _onehot_wrap(con, q, _match_col(live, cname), maxn)
 
     if spec.get("dedup"):
         keys = _aslist(spec["dedup"])
@@ -1038,8 +1263,11 @@ def diff(old, new, on, out=None, con=None):
         keys = _aslist(on)
         so, sn = _source(old), _source(new)
         ocols = columns(con, so)
+        ncols = columns(con, sn)
         kj = " AND ".join(f"o.{_ident(k)} = n.{_ident(k)}" for k in keys)
-        nonkey = [c for c in ocols if c not in keys]
+        # only compare non-key columns present in BOTH files, so diffing files
+        # with partly-different schemas works instead of throwing a binder error
+        nonkey = [c for c in ocols if c not in keys and c in ncols]
         changed_cond = " OR ".join(
             f"o.{_ident(c)} IS DISTINCT FROM n.{_ident(c)}" for c in nonkey
         ) or "FALSE"
@@ -1257,6 +1485,70 @@ def split(input_path, by, out_dir, fmt="csv", con=None, max_groups=2000):
         print(f"  done: {len(vals)} files, {total:,} rows -> {out_dir}")
         record_history("split", input_path, out_dir, total, extra={"files": len(vals)})
         return len(vals)
+    finally:
+        if own:
+            con.close()
+
+
+def traintest(input_path, out_dir, ratio=0.8, seed=42, by=None, before=None,
+              fmt="parquet", con=None, quiet=False):
+    """Split a dataset into train/test files.
+
+    Random (default): each row is assigned by a DETERMINISTIC hash of its values
+    (+ seed), so the split is reproducible and a row can never land in both files
+    or neither. `ratio` is the train fraction.
+
+    Time-based (`by`+`before`): rows with `by` < `before` go to train, >= go to
+    test - the correct, leak-free split for time-series (a random split would let
+    the future leak into the past).
+    """
+    own = con is None
+    con = con or connect(progress=(not quiet) and _tty())
+    try:
+        ensure_remote(con, input_path)
+        ext = str(fmt).lower().lstrip(".")
+        ensure_excel(con, input_path, f"_.{ext}")
+        src = _source(input_path)
+        cols = columns(con, src)
+
+        if by:
+            col = _match_col(cols, by)
+            if before is None:
+                raise ValueError("time-based split needs --before <value> together with --by")
+            thr = _sql_literal(before)
+            train_where = f"{_ident(col)} < {thr}"
+            test_where = f"{_ident(col)} >= {thr}"
+        else:
+            r = float(ratio)
+            if not 0 < r < 1:
+                raise ValueError("--ratio must be between 0 and 1 (e.g. 0.8)")
+            pct = max(1, min(99, int(round(r * 100))))
+            hcols = ", ".join(_ident(c) for c in cols)
+            bucket = f"(hash({int(seed)}, {hcols}) % 100)"
+            train_where = f"{bucket} < {pct}"
+            test_where = f"{bucket} >= {pct}"
+
+        os.makedirs(out_dir, exist_ok=True)
+        opts = _copy_opts(f"_.{ext}")
+        t0 = time.time()
+        counts = {}
+        for name, where in (("train", train_where), ("test", test_where)):
+            fpath = os.path.join(out_dir, f"{name}.{ext}")
+            row = con.execute(
+                f"COPY (SELECT * FROM {src} WHERE {where}) TO '{sql_path(fpath)}' {opts}"
+            ).fetchone()
+            counts[name] = row[0] if row else _count_file(con, fpath)
+        total = con.execute(f"SELECT count(*) FROM {src}").fetchone()[0]
+        if not quiet:
+            print(f"  train.{ext}: {counts['train']:,} rows")
+            print(f"  test.{ext}:  {counts['test']:,} rows")
+            kept = counts["train"] + counts["test"]
+            if kept < total:
+                print(f"  note: {total - kept:,} row(s) with a null/out-of-range '{by}' "
+                      "were left out of both files")
+            print(f"  done: train/test -> {out_dir}  ({time.time() - t0:,.1f}s)")
+        record_history("traintest", input_path, out_dir, counts["train"] + counts["test"])
+        return counts
     finally:
         if own:
             con.close()

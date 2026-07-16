@@ -382,6 +382,58 @@ Options:
 - `--method redact` — replace each value with a fixed placeholder.
 - `--method null` — replace each value with null.
 
+**Machine-learning prep (model-ready).** The next five commands turn a clean file into one
+you can hand straight to scikit-learn / XGBoost. Every one is pure DuckDB SQL — no numpy or
+scikit-learn dependency — so they keep the never-OOM guarantee on files bigger than RAM.
+
+#### scale
+
+Scale numeric columns for a model. `minmax` maps values to [0, 1]; `zscore` standardizes to
+mean 0 / standard deviation 1 (population standard deviation, matching scikit-learn's
+StandardScaler). NULLs stay NULL.
+
+```
+kenze scale data.parquet --cols amount,age --method minmax -o out.parquet
+```
+
+#### bin
+
+Bucket a numeric column into N bins, adding a `<col>_bin` column (values 1..N). `uniform` =
+equal-width buckets; `quantile` = equal-count buckets. NULLs stay NULL.
+
+```
+kenze bin data.parquet --cols age --into 5 --method uniform -o out.parquet
+```
+
+#### encode
+
+Label-encode categorical columns to 0-based integers, in place, in alphabetical order —
+matching scikit-learn's LabelEncoder.
+
+```
+kenze encode data.parquet --cols city,level -o out.parquet
+```
+
+#### onehot
+
+One-hot encode categorical columns into 0/1 indicator columns; the original column is
+dropped. Only the top `--max` values (by frequency) get their own column and the rest fold
+into `<col>_other`, so a high-cardinality column can't explode into thousands of columns.
+
+```
+kenze onehot data.parquet --cols city --max 50 -o out.parquet
+```
+
+#### clip-outliers
+
+Cap extreme values (winsorize). `iqr` clips to Tukey's fence
+[Q1 − 1.5·IQR, Q3 + 1.5·IQR]; `pct` clips to the [1st, 99th] percentile. Bounds are read
+with `approx_quantile`, so it stays memory-safe on huge columns.
+
+```
+kenze clip-outliers data.parquet --cols amount --method iqr -o out.parquet
+```
+
 ### 6.3 Row operations
 
 #### filter
@@ -538,6 +590,29 @@ kenze partition sales.parquet --by year,month -o lake/
 Options:
 - `--by cols` — one or more partition columns.
 - `--format parquet|csv` — the output format (default parquet).
+
+#### traintest
+
+Split a dataset into `train` and `test` files (for machine learning). Each row is assigned
+by a deterministic hash of its values (plus the seed), so the split is reproducible and a
+row can never land in both files or neither.
+
+```
+kenze traintest data.parquet --ratio 0.8 --seed 42 -o splits/
+```
+
+For time-series data, use a time-based split — a random split would leak future information
+into the past, inflating your accuracy:
+
+```
+kenze traintest data.parquet --by order_date --before 2026-01-01 -o splits/
+```
+
+Options:
+- `--ratio R` — the train fraction (default 0.8).
+- `--seed N` — seed for the deterministic assignment (default 42).
+- `--by col` / `--before value` — time-based split: rows with `col` < `value` go to train, the rest to test.
+- `--format parquet|csv|json` — the output format (default parquet).
 
 ### 6.6 Power tools and interoperability
 

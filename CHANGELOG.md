@@ -4,6 +4,47 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-07-16 - "Model-Ready"
+
+### Added (ML-prep - turn a clean file into a model-ready one, then hand it to scikit-learn / XGBoost; all pure DuckDB SQL, still never-OOM)
+- **`scale`** - scale numeric columns for machine learning.
+  `kenze scale data.parquet --cols amount,age --method minmax -o out`
+  (or `--method zscore`). minmax maps to [0, 1]; zscore standardizes to mean 0 /
+  std 1 (population std, matching scikit-learn's StandardScaler).
+  Recipe: `scale: amount:minmax, age:zscore`. Shell: `scale amount minmax`.
+- **`bin`** - bucket a numeric column into N bins, adding a `<col>_bin` column (1..N).
+  `kenze bin data.parquet --cols age --into 5 --method uniform -o out`
+  (`--method quantile` gives equal-count bins). Recipe: `bin: age:5, income:4:quantile`.
+  Shell: `bin age 5`.
+- **`encode`** - label-encode categorical columns to 0-based integers, in place.
+  `kenze encode data.parquet --cols city,level -o out`. Alphabetical order, matching
+  scikit-learn's LabelEncoder. Recipe: `encode: city, level`. Shell: `encode city`.
+- **`onehot`** - one-hot encode categorical columns to 0/1 indicator columns (the
+  original column is dropped). `kenze onehot data.parquet --cols city --max 50 -o out`.
+  To stay memory-safe on a high-cardinality column, only the top-N values (by
+  frequency) get their own column; the rest fold into `<col>_other`. Recipe:
+  `onehot: city, brand:20`. Shell: `onehot city`.
+- **`clip-outliers`** - cap extreme values (winsorize). `kenze clip-outliers data.parquet
+  --cols amount --method iqr -o out` (or `--method pct`). iqr = Tukey's
+  [Q1 - 1.5*IQR, Q3 + 1.5*IQR]; pct = [1st, 99th] percentile. Bounds come from
+  `approx_quantile` (streaming). Recipe: `clip_outliers: amount:iqr`. Shell: `clip-outliers amount iqr`.
+- **`traintest`** - split into train/test files. `kenze traintest data.parquet --ratio 0.8
+  --seed 42 -o splits/` writes `train`/`test` files; the assignment is a deterministic
+  hash of each row (+ seed), so a row can never land in both files or neither, and the
+  split is reproducible. Time-based (leak-free for time-series):
+  `kenze traintest data.parquet --by order_date --before 2026-01-01 -o splits/`.
+  Also in the shell (`traintest splits/ ratio 0.8`).
+- scale/bin/clip-outliers keep NULLs as NULL, handle a constant column, and give a clear
+  message on a non-numeric column; encode keeps NULLs as NULL; onehot maps NULL to all-zeros.
+
+### Improved
+- `diff` now compares only the non-key columns present in **both** files, so diffing two
+  files with partly-different schemas works instead of throwing an error.
+
+### API
+- `kenze.traintest(...)` is now importable, and any ML-prep step works through
+  `kenze.sift(..., scale="amount:minmax", encode="city")`.
+
 ## [0.7.1] - 2026-07-15
 
 ### Improved (interactive shell — argument handling)

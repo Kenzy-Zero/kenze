@@ -43,6 +43,7 @@ from .ops import (
     run_sql,
     sniff_preamble,
     split,
+    traintest,
     unpivot,
     validate,
 )
@@ -65,6 +66,11 @@ COMMANDS = {
     "cast":   ("SHAPE", "cast a column's type (col:TYPE)"),
     "fillna": ("SHAPE", "replace nulls in a column (col:value)"),
     "mask":   ("SHAPE", "mask sensitive columns (one-way hash)"),
+    "scale":  ("SHAPE", "scale a numeric column for ML (minmax / zscore)"),
+    "bin":    ("SHAPE", "bucket a numeric column into N bins (adds col_bin)"),
+    "encode": ("SHAPE", "label-encode a category column to integers (0-based)"),
+    "onehot": ("SHAPE", "one-hot encode a category column to 0/1 columns"),
+    "clip-outliers": ("SHAPE", "cap extreme values / winsorize (iqr / pct)"),
     "dedup":  ("SHAPE", "drop duplicate rows (cols, or all)"),
     "clip":   ("SHAPE", "keep rows inside a lat/lon bbox"),
     "sample": ("SHAPE", "keep N random rows"),
@@ -75,6 +81,7 @@ COMMANDS = {
     "unpivot": ("COMBINE", "reshape wide -> long"),
     "split":  ("COMBINE", "split the loaded file into many by a column's values"),
     "partition": ("COMBINE", "hive-partition the loaded file (col=value/)"),
+    "traintest": ("COMBINE", "split into train/test files (random or time-based)"),
     "assert": ("GUARD", "fail the run unless a condition holds (uses row_count)"),
     "assert-unique": ("GUARD", "fail the run if these column(s) have duplicates"),
     "assert-not-null": ("GUARD", "fail the run if these columns contain nulls"),
@@ -100,8 +107,8 @@ GROUPS = [("LOOK", "look at data"), ("SHAPE", "shape it"),
           ("PIPE", "the pipeline"), ("OUT", "get it out"), ("SHELL", "shell")]
 # commands whose arguments are (mostly) column names -> schema autocomplete
 COLUMN_CMDS = {"keep", "drop", "filter", "rename", "cast", "fillna", "mask",
-               "dedup", "pivot", "unpivot", "split", "partition", "plot",
-               "assert-unique", "assert-not-null"}
+               "scale", "bin", "encode", "onehot", "clip-outliers", "dedup", "pivot",
+               "unpivot", "split", "partition", "plot", "assert-unique", "assert-not-null"}
 # commands whose first argument is a file path -> path autocomplete
 FILE_CMDS = {"load", "open", "save", "run"}
 # how a step maps into a recipe spec; the shell folds them in order
@@ -237,6 +244,7 @@ class ShellState:
             spec["source_format"] = self.source_format
         filters, casts, fills, renames = [], [], [], []
         asserts, auniq, anotnull = [], [], []
+        scales, binspecs, encodes, onehots, clipouts = [], [], [], [], []
         for cmd, arg in self.steps:
             if cmd == "filter":
                 filters.append(arg)
@@ -246,6 +254,22 @@ class ShellState:
                 fills.append(arg)
             elif cmd == "rename":
                 renames.append(arg)
+            elif cmd == "scale":
+                p = arg.split()
+                scales.append(f"{p[0]}:{p[1] if len(p) > 1 else 'minmax'}")
+            elif cmd == "bin":
+                p = arg.split()
+                nb = p[1] if len(p) > 1 else "5"
+                mth = p[2] if len(p) > 2 else "uniform"
+                binspecs.append(f"{p[0]}:{nb}:{mth}")
+            elif cmd == "encode":
+                encodes.append(arg.split()[0])
+            elif cmd == "onehot":
+                p = arg.split()
+                onehots.append(p[0] if len(p) < 2 else f"{p[0]}:{p[1]}")
+            elif cmd == "clip-outliers":
+                p = arg.split()
+                clipouts.append(p[0] if len(p) < 2 else f"{p[0]}:{p[1]}")
             elif cmd == "mask":
                 spec["mask"] = arg
                 spec.setdefault("mask_method", "hash")
@@ -265,6 +289,16 @@ class ShellState:
             spec["fillna"] = ", ".join(fills)
         if renames:
             spec["rename"] = ", ".join(renames)
+        if scales:
+            spec["scale"] = ", ".join(scales)
+        if binspecs:
+            spec["bin"] = ", ".join(binspecs)
+        if encodes:
+            spec["encode"] = ", ".join(encodes)
+        if onehots:
+            spec["onehot"] = ", ".join(onehots)
+        if clipouts:
+            spec["clip_outliers"] = ", ".join(clipouts)
         if asserts:
             spec["assert"] = asserts
         if auniq:
@@ -544,7 +578,7 @@ def _add_step(st, cmd, arg, preview=True):
                     st.steps.pop()      # the repair didn't work either
             _say(f"  Error: {e}", "err")
             _say("  hint: text needs single quotes, use = to compare  ->  "
-                 "filter city = 'Dubai'   (numbers: age > 30)", "dim")
+                 "filter city = 'London'   (numbers: age > 30)", "dim")
             return
         _say(f"  Error: {e}", "err")
         return
@@ -598,7 +632,8 @@ def h_eject(st, arg):
 
 def _spec_to_recipe(spec):
     order = ["input", "keep", "drop", "filter", "bbox", "types", "fillna",
-             "mask", "mask_method", "rename", "dedup", "sample", "head",
+             "mask", "mask_method", "rename", "scale", "bin", "encode", "onehot",
+             "clip_outliers", "dedup", "sample", "head",
              "assert", "assert_unique", "assert_not_null", "output"]
     lines = ["# kenze recipe - generated from an interactive session"]
     for k in order:
@@ -809,6 +844,45 @@ def h_partition(st, arg):
     partition(st.input, by, out_dir, fmt=fmt, con=st.con, quiet=False)
 
 
+def h_traintest(st, arg):
+    if _need_input(st):
+        return
+    a = _split_args(arg)
+    if not a:
+        _say("  usage: traintest <out_dir> [ratio 0.8] [seed 42] [csv|parquet]", "warn")
+        _say("  time-based:  traintest <out_dir> by order_date before 2026-01-01", "dim")
+        return
+    out_dir = os.path.abspath(a[0])
+    ratio, seed, by, before, fmt = 0.8, 42, None, None, "parquet"
+    i = 1
+    while i < len(a):
+        t = a[i].lower()
+        if t == "ratio" and i + 1 < len(a):
+            try:
+                ratio = float(a[i + 1])
+            except ValueError:
+                _say(f"  ratio must be a number, got '{a[i + 1]}' - using 0.8", "warn")
+            i += 2
+        elif t == "seed" and i + 1 < len(a):
+            try:
+                seed = int(a[i + 1])
+            except ValueError:
+                _say(f"  seed must be a whole number, got '{a[i + 1]}' - using 42", "warn")
+            i += 2
+        elif t == "by" and i + 1 < len(a):
+            by, i = a[i + 1], i + 2
+        elif t == "before" and i + 1 < len(a):
+            before, i = a[i + 1], i + 2
+        elif t in ("csv", "parquet", "json"):
+            fmt, i = t, i + 1
+        else:
+            _say(f"  ignoring: {a[i]}", "warn")
+            i += 1
+    _pending_note(st)
+    traintest(st.input, out_dir, ratio=ratio, seed=seed, by=by, before=before,
+              fmt=fmt, con=st.con, quiet=False)
+
+
 # ---- data-quality guards (checked before a `run` write) ------------
 
 _ASSERT_USAGE = {
@@ -845,6 +919,17 @@ def _spec_to_steps(spec):
                      ("sample", "sample"), ("head", "head")):
         if spec.get(key):
             steps.append((cmd, j(spec[key])))
+    for key in ("scale", "bin", "encode", "onehot"):   # 'col:method' list -> one step each
+        if spec.get(key):
+            for item in str(spec[key]).split(","):
+                item = item.strip()
+                if item:
+                    steps.append((key, item.replace(":", " ")))
+    if spec.get("clip_outliers"):        # spec key differs from the command name
+        for item in str(spec["clip_outliers"]).split(","):
+            item = item.strip()
+            if item:
+                steps.append(("clip-outliers", item.replace(":", " ")))
     for a in _multi(spec.get("assert")):
         steps.append(("assert", a))
     for a in _multi(spec.get("assert_unique")):
@@ -966,14 +1051,15 @@ HANDLERS = {
     "save": h_save, "run": h_run, "pwd": h_pwd, "cd": h_cd,
     "check": h_check, "validate": h_validate, "join": h_join, "diff": h_diff,
     "pivot": h_pivot, "unpivot": h_unpivot, "split": h_split,
-    "partition": h_partition, "dryrun": h_dryrun, "set": h_set,
+    "partition": h_partition, "traintest": h_traintest, "dryrun": h_dryrun, "set": h_set,
     "open": h_open, "recipe": h_recipe,
     "help": h_help, "clear": h_clear,
 }
 for _a in ("assert", "assert-unique", "assert-not-null"):
     HANDLERS[_a] = (lambda c: (lambda st, arg: _add_assert(st, c, arg)))(_a)
 for _c in ("keep", "drop", "filter", "rename", "cast", "fillna", "mask",
-           "dedup", "clip", "sample", "head"):
+           "scale", "bin", "encode", "onehot", "clip-outliers", "dedup", "clip",
+           "sample", "head"):
     HANDLERS[_c] = (lambda c: (lambda st, arg: _add_step(st, c, arg)))(_c)
 
 
