@@ -1,0 +1,45 @@
+name: Benchmark
+
+# The never-OOM claim, measured on a clean Linux runner: pandas (eager) is
+# hard-capped to the memory budget and dies; kenze streams within the same
+# budget (spilling to disk) and finishes. Runs on demand and on each release.
+on:
+  workflow_dispatch:
+    inputs:
+      rows:
+        description: "rows in the synthetic CSV"
+        default: "60000000"
+      mem_gb:
+        description: "memory budget per engine (GB)"
+        default: "3"
+  release:
+    types: [published]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pandas polars psutil
+
+      - name: Run benchmark
+        run: |
+          python bench/benchmark.py \
+            --rows "${{ github.event.inputs.rows || '60000000' }}" \
+            --mem-gb "${{ github.event.inputs.mem_gb || '3' }}" \
+            --data "${RUNNER_TEMP}/bench_data.csv"
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: bench/RESULTS.md

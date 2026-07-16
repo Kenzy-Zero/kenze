@@ -4,6 +4,13 @@ build/
 *.egg-info/
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
+
+# benchmark scratch (generated data + local results; CI uploads results as an artifact)
+bench/_bench_data.csv
+bench/_out_*.csv
+bench/RESULTS.md
 
 # local envs
 .venv/

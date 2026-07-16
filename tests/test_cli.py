@@ -1,0 +1,53 @@
+"""End-to-end CLI: prove the installed `kenze` entry point actually runs. Uses
+the same interpreter running the tests (editable install locally, pip install
+in CI), so `python -m kenze ...` exercises the real console command."""
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+
+from conftest import fs
+
+
+def kenze_cli(*args, **kw):
+    return subprocess.run([sys.executable, "-m", "kenze", *args],
+                          capture_output=True, text=True, **kw)
+
+
+def test_version():
+    r = kenze_cli("--version")
+    assert r.returncode == 0 and "kenze" in r.stdout
+
+
+def test_profile(people):
+    r = kenze_cli("profile", people)
+    assert r.returncode == 0 and "12 rows" in r.stdout
+
+
+def test_filter_writes_output(people, tmp_path, sql):
+    out = fs(tmp_path / "cli.csv")
+    r = kenze_cli("filter", people, "--where", "amount > 100", "-o", out, "-q")
+    assert r.returncode == 0
+    assert sql(f"SELECT count(*) FROM '{out}'")[0][0] > 0
+
+
+def test_validate_exit_code(people, tmp_path):
+    """validate returns exit 1 when the schema doesn't match (cron-safe)."""
+    schema = tmp_path / "schema.json"
+    schema.write_text(json.dumps({"columns": {"id": "VARCHAR"},
+                                  "not_null": ["missing_col"]}), encoding="utf-8")
+    r = kenze_cli("validate", people, "--schema", str(schema))
+    assert r.returncode == 1  # problems found -> non-zero for pipelines
+
+
+def test_recipe_reference_prints():
+    r = kenze_cli("recipe")
+    assert r.returncode == 0 and "input:" in r.stdout and "output:" in r.stdout
+
+
+def test_bad_command_is_friendly_not_traceback(tmp_path):
+    r = kenze_cli("profile", str(tmp_path / "nope.csv"))
+    assert r.returncode != 0
+    assert "Traceback" not in r.stderr        # clean error, no stack dump
+    assert "Error" in (r.stderr + r.stdout) or "no such file" in (r.stderr + r.stdout)

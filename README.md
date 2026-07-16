@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/kenze.svg)](https://pypi.org/project/kenze/)
 [![Python versions](https://img.shields.io/pypi/pyversions/kenze.svg)](https://pypi.org/project/kenze/)
 [![License](https://img.shields.io/pypi/l/kenze.svg)](https://github.com/Kenzy-Zero/kenze/blob/main/LICENSE)
-[![Downloads](https://img.shields.io/pypi/dm/kenze.svg)](https://pypi.org/project/kenze/)
+[![Downloads](https://static.pepy.tech/badge/kenze)](https://pepy.tech/project/kenze)
 [![CI](https://github.com/Kenzy-Zero/kenze/actions/workflows/ci.yml/badge.svg)](https://github.com/Kenzy-Zero/kenze/actions/workflows/ci.yml)
 
 **Big-file data prep that never runs out of memory — an interactive shell *and* a one-line CLI.**
@@ -190,6 +190,28 @@ Run any of these as a one-liner, or run `kenze` and do it all interactively — 
 shell wraps every command above plus session helpers (`open`, `set`, `dryrun`,
 `pwd`/`cd`, `undo`, `steps`). See **[SHELL.md](https://github.com/Kenzy-Zero/kenze/blob/main/SHELL.md)** for the shell guide.
 
+## Performance
+
+The whole point of kenze is that it doesn't fall over on files bigger than your
+RAM. The repo ships a **reproducible benchmark** that proves it: it generates a
+large synthetic CSV and runs the same job (filter → group-by → aggregate) with
+pandas, polars and kenze, each given the **same memory budget**.
+
+- **pandas** (eager) tries to load the whole file, blows past the budget, and dies with an out-of-memory error.
+- **kenze** streams the job *within* the budget — spilling to disk when it has to — and finishes.
+
+Run it yourself:
+
+```bash
+pip install pandas polars psutil
+python bench/benchmark.py --rows 60000000 --mem-gb 3
+```
+
+It prints a markdown table (outcome / wall time / peak memory) and writes
+`bench/RESULTS.md`. The same benchmark runs in CI
+([Benchmark workflow](https://github.com/Kenzy-Zero/kenze/actions/workflows/benchmark.yml)),
+where the results are uploaded as a build artifact and posted to the run summary.
+
 ## Where it stops (on purpose)
 
 kenze is one dependency and one machine — that's the whole point. It maxes out
@@ -212,7 +234,12 @@ your PATH (this affects every pip-installed CLI). Options:
 
 Found a bug, want a new command, or hit something confusing? **Open an issue:**
 [github.com/Kenzy-Zero/kenze/issues](https://github.com/Kenzy-Zero/kenze/issues).
-(The shell prints this link too — `help`.) Pull requests welcome; a
-[GitHub star](https://github.com/Kenzy-Zero/kenze) helps others find kenze.
+(The shell prints this link too — `help`.) Pull requests welcome — see
+**[CONTRIBUTING.md](https://github.com/Kenzy-Zero/kenze/blob/main/CONTRIBUTING.md)**.
+A [GitHub star](https://github.com/Kenzy-Zero/kenze) helps others find kenze.
+
+Every command is covered by a test suite (`tests/`) that runs on Linux and Windows
+across Python 3.9–3.13 (see the CI badge) — including the data-quality guards and
+the ML-prep transforms. Run it locally with `pip install -e ".[dev]" && pytest`.
 
 MIT licensed.
