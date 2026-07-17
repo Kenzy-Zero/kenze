@@ -13,6 +13,8 @@ pandas. It's a friendly front-end over [DuckDB](https://duckdb.org): DuckDB does
 the heavy lifting (streaming, disk-spill, all your CPU cores), `kenze` makes it
 effortless — and auto-configures memory so your job doesn't crash.
 
+![kenze in action — load, filter, plot and run a 60M-row file without ever running out of memory](demo.gif)
+
 ```bash
 pip install kenze
 ```

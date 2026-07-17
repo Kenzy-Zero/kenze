@@ -41,6 +41,9 @@ Screenshot*.png
 *.gif
 *.webp
 
+# exception: the demo GIF shown in the README is intentionally published
+!demo.gif
+
 # marketing drafts (not for the public repo)
 LAUNCH_POSTS.md
 
