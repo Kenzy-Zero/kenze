@@ -2,7 +2,7 @@
 
 Big-file data preparation that never runs out of memory. No SQL required.
 
-Version 0.8.0
+Version 0.8.1
 
 ---
 
@@ -997,7 +997,7 @@ kenze follows semantic versioning. The core stays small and grows one release at
 a time. Each release is built, checked, published to PyPI, and verified with a
 clean-environment install before being considered done.
 
-The current release is 0.8.0.
+The current release is 0.8.1.
 
 ---
 

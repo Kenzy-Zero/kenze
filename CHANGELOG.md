@@ -4,6 +4,13 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.1] - 2026-07-17
+
+### Docs
+- Add a demo GIF to the README showing the interactive shell in action
+  (load → filter → plot → run a 60-million-row file without ever running out of
+  memory). Uses an absolute URL so it renders on both GitHub and the PyPI page.
+
 ## [0.8.0] - 2026-07-16 - "Model-Ready"
 
 ### Added (ML-prep - turn a clean file into a model-ready one, then hand it to scikit-learn / XGBoost; all pure DuckDB SQL, still never-OOM)
