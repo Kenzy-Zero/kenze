@@ -1,0 +1,24 @@
+# kenze
+
+> Big-file data prep that never runs out of memory — an interactive shell and a one-line CLI, powered by DuckDB. kenze cleans and reshapes data files (CSV, Parquet, JSON) that are too big for pandas, streaming everything out-of-core so a file larger than RAM never raises MemoryError. No SQL required.
+
+kenze is a Python tool (`pip install kenze`) for people who hit `MemoryError` in pandas on a large CSV/Parquet/JSON file. It is a friendly front-end over DuckDB: DuckDB does the streaming, disk-spill, and multi-core work; kenze auto-configures memory so the job does not crash, and exposes simple verbs (no SQL) both as an interactive shell and a one-line CLI.
+
+## What it solves
+- Reading and processing a CSV/Parquet file that is larger than RAM without crashing (out-of-core / larger-than-memory data prep).
+- Cleaning, filtering, deduping, joining, reshaping, and ML-prep on big files with no SQL and no pandas out-of-memory errors.
+- A friendly alternative to writing DuckDB SQL by hand, and to pandas for files too big for memory.
+
+## Key facts
+- Install: `pip install kenze` — one name for the package, the `kenze` command, and `import kenze`.
+- Interactive shell: run `kenze` with no args for a live session (load once, stack steps with live previews, run to a file or save a recipe). Type `/` for a command menu; TAB autocompletes real column names.
+- One-line CLI: 38 commands — keep, drop, filter, rename, cast, fillna, dedup, sample, join, diff, pivot, split, partition, and more.
+- Model-ready: scale, bin, encode, onehot, clip-outliers, and a reproducible traintest split for scikit-learn / XGBoost.
+- Never-OOM: memory is auto-capped and DuckDB spills to disk; full writes stream with a progress bar.
+- Formats: CSV, Parquet, JSON, Excel (.xlsx), plus s3:// / gs:// / https:// cloud paths.
+
+## Links
+- PyPI: https://pypi.org/project/kenze/
+- Source (GitHub): https://github.com/Kenzy-Zero/kenze
+- Shell guide: https://github.com/Kenzy-Zero/kenze/blob/main/SHELL.md
+- Docs: https://github.com/Kenzy-Zero/kenze/blob/main/DOCS.md
