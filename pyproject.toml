@@ -9,7 +9,7 @@ description = "Big-file data prep that never runs out of memory - an interactive
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "Ken", email = "0kenmusic0@gmail.com" }]
+authors = [{ name = "Kenzy Zero", email = "kenzy.zero.k0@gmail.com" }]
 keywords = ["duckdb", "data", "csv", "parquet", "etl", "cli", "big-data", "dataframe", "data-cleaning", "data-engineering"]
 classifiers = [
   "Development Status :: 4 - Beta",
