@@ -121,7 +121,7 @@ aborts and no output file is produced. Saved into the recipe by `save`.
 | `run <name> [append] [errors <file>] [log <file>]` | run the pipeline and write the result (format from the extension). `append` adds to an existing file, `errors` quarantines bad CSV rows, `log` writes a JSON run manifest |
 | `save <name.dq>` | save the pipeline as a reusable recipe file |
 | `dryrun` | show what `run` would write (the output columns) without writing |
-| `eject [python]` | print the raw DuckDB SQL (or a Python snippet) for the pipeline - no lock-in |
+| `eject [python] [<file>]` | print the pipeline's DuckDB SQL (or Python); add a filename (`eject out.sql` / `eject out.py`) to save it - no lock-in |
 | `sql <query>` | run any DuckDB SQL and print the result (window functions, group-by, ...) |
 
 ### The shell
@@ -223,7 +223,9 @@ read, edit and version. Run it again any time, from anywhere:
 
 `eject` is the escape hatch: it prints the exact SQL (or a Python snippet) the
 pipeline compiles to, so you can paste it into a notebook, a dbt model, or
-production - kenze never locks you in.
+production - kenze never locks you in. Add a filename to write it straight to a
+file: `eject out.sql` or `eject out.py` (the format is taken from the extension,
+or say it explicitly with `eject python out.py`).
 
 ---
 

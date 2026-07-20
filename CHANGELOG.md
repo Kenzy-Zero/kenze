@@ -4,6 +4,19 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.2] - 2026-07-20
+
+### Added
+- **Shell: `eject` can save straight to a file.** `eject out.sql` / `eject out.py`
+  (or `eject python out.py`) writes the code to that file from inside the shell — no
+  need to exit and redirect. The format is inferred from the extension.
+
+### Fixed
+- **Shell: `eject` no longer silently falls back to SQL** on an unrecognized argument.
+  Typing the terminal form (`eject recipe.dq --to python`) inside the shell now shows a
+  clear usage hint instead of quietly printing SQL. `eject`, `eject python`,
+  `eject --to python`, and `eject py` all work.
+
 ## [0.8.1] - 2026-07-17
 
 ### Docs

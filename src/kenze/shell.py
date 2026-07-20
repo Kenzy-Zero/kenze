@@ -89,7 +89,7 @@ COMMANDS = {
     "undo":   ("PIPE", "remove the last step"),
     "reset":  ("PIPE", "clear all steps (keep the loaded file)"),
     "sql":    ("OUT", "run raw DuckDB SQL and print the result"),
-    "eject":  ("OUT", "show the SQL for the current pipeline"),
+    "eject":  ("OUT", "show the SQL/python for the pipeline (add a filename to save it)"),
     "dryrun": ("OUT", "show what `run` would write (schema), without writing"),
     "save":   ("OUT", "save the pipeline as a reusable .dq recipe"),
     "run":    ("OUT", "run the pipeline and write an output file"),
@@ -624,9 +624,48 @@ def h_sql(st, arg):
 def h_eject(st, arg):
     if _need_input(st):
         return
-    to = "python" if arg.strip() == "python" else "sql"
+    # shell forms:
+    #   eject                      -> print the SQL
+    #   eject python               -> print a runnable python script
+    #   eject out.sql / out.py     -> WRITE it to that file (format from the extension)
+    #   eject python out.py        -> WRITE python to out.py
+    # forgiving of `--to python`, `py`, `--to=python`; warn on anything else
+    # (a `.dq` recipe or junk) instead of silently doing the wrong thing.
+    tokens = arg.replace("--to=", " ").replace("--to", " ").split()
+    to = None
+    target = None
+    unknown = []
+    for t in tokens:
+        low = t.lower()
+        if low == "sql":
+            to = "sql"
+        elif low in ("python", "py"):
+            to = "python"
+        elif low.endswith((".sql", ".py", ".txt")):
+            target = t
+        else:
+            unknown.append(t)
+    if unknown:
+        _say("  usage: eject  |  eject python  |  eject out.sql  |  eject out.py "
+             "  (add a filename to save it)", "warn")
+        _say(f"  don't understand '{' '.join(unknown)}' - the `recipe.dq --to python` "
+             f"form is for the terminal, not the shell", "dim")
+        return
+    if to is None:  # infer format from the file extension, else default to SQL
+        to = "python" if (target and target.lower().endswith(".py")) else "sql"
+    code = eject(st.build_spec(), to=to)
+    if target:
+        path = os.path.abspath(target)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(code + "\n")
+        except OSError as e:
+            _say(f"  couldn't write {path}: {e}", "warn")
+            return
+        _say_parts([("ok", f"  ejected {to} -> "), ("accent2", path)])
+        return
     print()
-    _say(eject(st.build_spec(), to=to), "dim")
+    _say(code, "dim")
     print()
 
 
