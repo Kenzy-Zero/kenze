@@ -118,6 +118,85 @@ _STEP_KEYS = {
     "dedup": "dedup", "sample": "sample", "head": "head",
 }
 
+# guided next-step hints: command -> (what to type next, example, needs an arg?,
+# [optional keyword completions]). Drives the live bottom-toolbar hint + TAB.
+CMD_GUIDE = {
+    "load":    ("a file to load", "load data.csv", True, []),
+    "open":    ("a recipe file", "open clean.dq", True, []),
+    "filter":  ("a condition", "filter amount > 100", True, []),
+    "keep":    ("columns to keep", "keep id, city", True, []),
+    "drop":    ("columns to drop", "drop notes", True, []),
+    "rename":  ("old:new", "rename amount:total", True, []),
+    "cast":    ("col:TYPE", "cast id:VARCHAR", True, []),
+    "fillna":  ("col:value", "fillna city:unknown", True, []),
+    "mask":    ("columns to mask", "mask email, phone", True, []),
+    "scale":   ("col:method", "scale age:zscore", True, []),
+    "bin":     ("col:bins", "bin age:5", True, []),
+    "encode":  ("a column", "encode city", True, []),
+    "onehot":  ("a column", "onehot city", True, []),
+    "dedup":   ("columns (or Enter for whole-row)", "dedup id", False, []),
+    "sample":  ("how many rows", "sample 1000", True, []),
+    "head":    ("how many rows", "head 100", True, []),
+    "clip":    ("min_lon,min_lat,max_lon,max_lat", "clip 55,25,56,26", True, []),
+    "plot":    ("a column", "plot amount by city", True, []),
+    "sql":     ("a SQL query", "sql SELECT * FROM data LIMIT 5", True, []),
+    "join":    ("a file + on <key>", "join other.csv on id", True, []),
+    "run":     ("an output file", "run clean.csv", True, ["append", "errors", "log"]),
+    "convert": ("an output file", "convert out.geojson", True, ["geom=", "lat=", "lon="]),
+    "save":    ("a recipe file", "save clean.dq", True, []),
+    "eject":   ("nothing (Enter to print), or a file", "eject out.sql", False, ["python"]),
+    "set":     ("a setting", "set memory 4GB", True,
+                ["memory", "threads", "temp", "disk-check", "skip-bad"]),
+    "cd":      ("a folder", "cd outputs", True, []),
+    "validate": ("a schema file", "validate schema.json", True, []),
+    "diff":    ("another file + on <key>", "diff new.csv on id", True, []),
+    "pivot":   ("on <col> values <col>", "pivot on month values sales", True, []),
+    "unpivot": ("columns to fold", "unpivot jan,feb,mar", True, []),
+    "split":   ("by <column>", "split by city", True, []),
+    "partition": ("by <column>", "partition by year", True, []),
+    "traintest": ("an output folder", "traintest split/ ratio 0.8", True, []),
+    "assert":  ("a condition", "assert row_count > 0", True, []),
+    "assert-unique":   ("column(s)", "assert-unique id", True, []),
+    "assert-not-null": ("column(s)", "assert-not-null id", True, []),
+    "clip-outliers": ("col:method", "clip-outliers amount:iqr", True, []),
+}
+# commands that run immediately - nothing more to type, just Enter
+READY_ON_ENTER = {"peek", "schema", "count", "stats", "steps", "undo", "reset",
+                  "pwd", "history", "help", "clear", "exit", "dryrun", "recipe", "check"}
+# method / type keywords completed after a colon (cast id:VARCHAR, scale x:zscore)
+_COL_METHODS = {
+    "cast": ["VARCHAR", "INT", "BIGINT", "DOUBLE", "DATE", "TIMESTAMP", "BOOLEAN"],
+    "scale": ["minmax", "zscore"],
+    "clip-outliers": ["iqr", "pct"],
+}
+
+
+def _guide_hint(text, has_input):
+    """What to type next for the current input line. Returns (kind, message):
+    kind is 'start'/'flow'/'need'/'ready', message is the guidance text."""
+    stripped = text.strip()
+    if stripped.startswith("/"):
+        stripped = stripped[1:].strip()
+    if not stripped:
+        if not has_input:
+            return ("start", "load a file to begin    e.g.  load data.csv")
+        return ("flow", "add a step (filter / keep / dedup ...) then  run out.csv"
+                         "    -or-  convert out.geojson")
+    parts = stripped.split(None, 1)
+    cmd = parts[0].lower()
+    arg = parts[1].strip() if len(parts) > 1 else ""
+    if cmd in READY_ON_ENTER:
+        return ("ready", "press Enter to run")
+    g = CMD_GUIDE.get(cmd)
+    if not g:
+        return None
+    label, eg, needs, opts = g
+    if not arg and needs:
+        return ("need", f"next: {label}    e.g.  {eg}")
+    if opts:
+        return ("ready", f"press Enter to run    (optional: {' '.join(opts)})")
+    return ("ready", "press Enter to run")
+
 # gradient-gold wordmark (figlet 'slant', pure ASCII) shown on entry
 _WORDMARK = [
     "     __                       ",
@@ -1257,11 +1336,22 @@ def make_completer(st):
                 return
             cmd = stripped.split(None, 1)[0].lstrip("/").lower()
             if cmd in FILE_CMDS:
-                # the WHOLE argument after the command is the path - it may contain
-                # spaces (`load my folder/data.csv`), so complete the full remainder,
-                # not just the last whitespace-separated token.
                 after = stripped.split(None, 1)
-                cur_path = after[1] if len(after) > 1 else ""
+                remainder = after[1] if len(after) > 1 else ""
+                opts = CMD_GUIDE.get(cmd, (None, None, None, []))[3]
+                # for run/convert: once a plain output file is typed, complete OPTIONS
+                if opts and remainder.lstrip()[:1] not in ("'", '"'):
+                    toks = remainder.split()
+                    new_tok = text.endswith((" ", "\t"))
+                    if len(toks) >= 2 or (len(toks) == 1 and new_tok):
+                        frag = "" if new_tok else toks[-1]
+                        for o in opts:
+                            if o.lower().startswith(frag.lower()):
+                                yield Completion(o, start_position=-len(frag),
+                                                 display_meta="option")
+                        return
+                # otherwise complete the path (the WHOLE remainder - may have spaces)
+                cur_path = remainder
                 if cur_path[:1] in ("'", '"'):        # a quoted path being typed
                     cur_path = cur_path[1:]
                 sub = Document(cur_path, len(cur_path))
@@ -1269,6 +1359,17 @@ def make_completer(st):
                     yield c
                 return
             cur = text.split()[-1] if not text.endswith((" ", "\t")) else ""
+            if cmd in _COL_METHODS and ":" in cur:    # method/type after a colon
+                frag = cur.rsplit(":", 1)[-1]
+                for m in _COL_METHODS[cmd]:
+                    if m.lower().startswith(frag.lower()):
+                        yield Completion(m, start_position=-len(frag), display_meta="type")
+                return
+            if cmd == "set":                          # setting names
+                for s in CMD_GUIDE["set"][3]:
+                    if s.startswith(cur.lower()):
+                        yield Completion(s, start_position=-len(cur), display_meta="setting")
+                return
             if cmd in COLUMN_CMDS and st.cols and ":" not in cur:
                 if cmd == "filter":
                     # only suggest a column for the FIRST bare word of the
@@ -1320,20 +1421,30 @@ def _pretty_repl(st):
     from prompt_toolkit.shortcuts import CompleteStyle
 
     def toolbar():
-        if not st.input:
-            return FormattedText([
-                ("class:tb-dim", "  no file loaded    "),
-                ("class:tb-key", "/"), ("class:bottom-toolbar", " menu    "),
-                ("class:tb-key", "help"), ("class:bottom-toolbar", " guide    "),
-                ("class:tb-key", "exit"), ("class:bottom-toolbar", " quit "),
-            ])
-        return FormattedText([
-            ("class:bottom-toolbar", f"  {os.path.basename(st.input)}    "),
-            ("class:tb-dim", f"{len(st.cols)} cols    {len(st.steps)} steps    "),
-            ("class:tb-key", "TAB"), ("class:bottom-toolbar", " autofill    "),
-            ("class:tb-key", "/"), ("class:bottom-toolbar", " menu    "),
+        # live "what to type next" guidance, driven by the current input line
+        try:
+            from prompt_toolkit.application import get_app
+            typed = get_app().current_buffer.text
+        except Exception:
+            typed = ""
+        hint = _guide_hint(typed, bool(st.input))
+        left = []
+        if hint:
+            kind, msg = hint
+            marker = "OK" if kind == "ready" else "->"
+            left = [("class:tb-key", f"  {marker} "),
+                    ("class:bottom-toolbar", f"{msg}    ")]
+        elif st.input:
+            left = [("class:bottom-toolbar", f"  {os.path.basename(st.input)}  "),
+                    ("class:tb-dim", f"{len(st.steps)} steps    ")]
+        else:
+            left = [("class:tb-dim", "  no file loaded    ")]
+        right = [
+            ("class:tb-key", "TAB"), ("class:bottom-toolbar", " next   "),
+            ("class:tb-key", "/"), ("class:bottom-toolbar", " menu   "),
             ("class:tb-key", "exit"), ("class:bottom-toolbar", " quit "),
-        ])
+        ]
+        return FormattedText(left + right)
 
     prompt_msg = FormattedText([("class:brand", "kenze"), ("class:arrow", " > ")])
     session = PromptSession(

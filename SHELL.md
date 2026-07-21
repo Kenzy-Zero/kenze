@@ -195,11 +195,26 @@ just works).
 
 ---
 
+## Guided next-step hints
+
+The bottom toolbar tells you **what to type next** for whatever you're doing:
+
+- With nothing loaded it says `load a file to begin` (with an example).
+- With a file loaded and an empty line it nudges you to add a step or write an output.
+- As you type a command it shows what comes next - e.g. `filter` shows
+  `next: a condition   e.g. filter amount > 100`, and once the line is complete it
+  flips to `[OK] press Enter to run`. Commands with extras (like `run`, `convert`)
+  also list their optional keywords.
+
+So you never have to remember a command's shape: type the command, read the hint,
+fill in what it asks for, and press Enter.
+
 ## Autocomplete and keys
 
 - Type `/` to open the command menu; keep typing to filter it (`/fi` -> filter).
-- After `load`, typing a column argument suggests the file's real column names -
-  press **TAB** to autofill the top suggestion.
+- Typing a column argument suggests the file's real column names; **TAB** autofills.
+- TAB also completes options: `run`/`convert` keywords, `set` settings, and the
+  type/method after a colon (`cast id:VARCHAR`, `scale x:zscore`).
 - **Up / Down** browse an open menu; **Shift-TAB** steps back; **Esc** dismisses it.
 - **Ctrl-C** clears the current line; **Ctrl-D** (or `exit`) leaves.
 

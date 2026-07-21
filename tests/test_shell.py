@@ -23,3 +23,26 @@ def test_convert_is_in_the_shell():
     assert "convert" in shell.COMMANDS
     assert "convert" in shell.HANDLERS
     assert "convert" in shell.FILE_CMDS      # gets file-path autocomplete
+
+
+def test_guide_hint_states():
+    gh = shell._guide_hint
+    assert gh("", False)[0] == "start"                 # no file yet
+    assert gh("", True)[0] == "flow"                   # file loaded, empty line
+    assert gh("peek", True)[0] == "ready"              # ready-on-Enter command
+    kind, msg = gh("filter", True)                     # needs an argument
+    assert kind == "need" and "condition" in msg
+    assert gh("filter amount > 0", True)[0] == "ready"
+    kind, msg = gh("convert", True)                    # needs output + example
+    assert kind == "need" and "convert out.geojson" in msg
+    kind, msg = gh("convert out.geojson", True)        # ready + optional opts shown
+    assert kind == "ready" and "geom=" in msg
+    assert gh("/peek", True)[0] == "ready"             # slash prefix handled
+    assert gh("frobnicate", True) is None              # unknown command -> no hint
+
+
+def test_every_command_has_a_next_step_hint():
+    # every menu command should give "what to type next" guidance
+    for name in shell.COMMANDS:
+        assert name in shell.CMD_GUIDE or name in shell.READY_ON_ENTER, \
+            f"{name} has no next-step hint (add it to CMD_GUIDE or READY_ON_ENTER)"

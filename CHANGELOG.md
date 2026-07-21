@@ -4,6 +4,20 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.5] - 2026-07-21
+
+### Added
+- **Guided shell: the bottom toolbar now tells you what to type next.** As you
+  type, it shows the next expected argument with an example (e.g. `filter` ->
+  `next: a condition   e.g. filter amount > 100`), and flips to `[OK] press Enter
+  to run` once the line is complete. With nothing loaded it points you to `load`;
+  with a file loaded it nudges you toward a step or an output. Every command has a
+  hint. So you don't have to remember any command's shape.
+- **Smarter TAB completion.** Beyond commands, columns and file paths, TAB now
+  completes option keywords for `run`/`convert` (`append`/`errors`/`log`,
+  `geom=`/`lat=`/`lon=`), `set` settings, and the type/method after a colon
+  (`cast id:VARCHAR`, `scale x:zscore`, `clip-outliers a:iqr`).
+
 ## [0.8.4] - 2026-07-21
 
 ### Added
