@@ -4,6 +4,22 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.4] - 2026-07-21
+
+### Added
+- **`convert` reads GeoJSON-geometry columns.** When writing GeoJSON, the geometry
+  column (`--geom`, or an auto-detected `geometry`/`geom`/`coordinates` column) may
+  now hold either WKT (`POINT(...)`) or a GeoJSON geometry object (`{"type":...}`) —
+  kenze sniffs the value and parses it accordingly. So a spreadsheet whose column
+  holds GeoJSON polygons converts straight to a real `.geojson`.
+
+### Fixed
+- **Shell `convert` no longer silently overwrites your loaded file.** Passing the
+  terminal form inside the shell (`convert input -o output`) now shows a clear
+  message ("in the shell the file is already loaded — convert takes just the
+  OUTPUT") instead of mis-reading the input path as the output. It also refuses to
+  write to the exact file you loaded, so your source can't be clobbered by accident.
+
 ## [0.8.3] - 2026-07-21
 
 ### Added

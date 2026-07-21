@@ -513,7 +513,8 @@ def _geo_cols(cols):
     low = {c.lower(): c for c in cols}
     lat = next((low[n] for n in ("lat", "latitude", "y") if n in low), None)
     lon = next((low[n] for n in ("lon", "lng", "long", "longitude", "x") if n in low), None)
-    wkt = next((low[n] for n in ("geometry", "geom", "wkt") if n in low), None)
+    wkt = next((low[n] for n in ("geometry", "geom", "wkt", "coordinates", "geojson")
+                if n in low), None)
     return lat, lon, wkt
 
 
@@ -529,7 +530,14 @@ def _geojson_write(con, q, spec):
         if not wkt:
             lat, lon = alat, alon
     if wkt:
-        geom, used = f"ST_GeomFromText({_ident(wkt)})", [wkt]
+        # the geometry column may hold WKT ('POINT(...)') or a GeoJSON geometry
+        # object ('{"type":...}') - sniff a value and pick the right parser.
+        sample = con.execute(
+            f"SELECT {_ident(wkt)} FROM ({q}) _s WHERE {_ident(wkt)} IS NOT NULL LIMIT 1"
+        ).fetchone()
+        as_json = bool(sample) and str(sample[0]).lstrip().startswith("{")
+        fn = "ST_GeomFromGeoJSON" if as_json else "ST_GeomFromText"
+        geom, used = f"{fn}({_ident(wkt)})", [wkt]
     elif lat and lon:
         geom, used = f"ST_Point({_ident(lon)}, {_ident(lat)})", [lat, lon]
     else:

@@ -176,7 +176,7 @@ def build_parser():
     _io(sp)
     sp.add_argument("--lat", help="latitude column when writing GeoJSON points")
     sp.add_argument("--lon", help="longitude column when writing GeoJSON points")
-    sp.add_argument("--geom", help="WKT geometry column when writing GeoJSON")
+    sp.add_argument("--geom", help="geometry column when writing GeoJSON (WKT or a GeoJSON-geometry object)")
 
     # combine / reshape / fan-out
     sp = cmd("join", help="join two files on a key")

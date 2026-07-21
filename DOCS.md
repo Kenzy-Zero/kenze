@@ -2,7 +2,7 @@
 
 Big-file data preparation that never runs out of memory. No SQL required.
 
-Version 0.8.3
+Version 0.8.4
 
 ---
 
@@ -502,9 +502,12 @@ kenze convert sales.csv     -o report.xlsx
 
 **GeoJSON.** Writing a `.geojson` needs a geometry. kenze builds it from a lat/lon
 pair (column names like `latitude`/`longitude`/`lat`/`lon` are auto-detected) or a
-WKT column, and you can name them explicitly with `--lat` / `--lon` / `--geom`.
-Reading a `.geojson` flattens the geometry into a WKT `geometry` column so it
-behaves like any other table.
+geometry column (named `geometry`/`geom`/`coordinates`, or given with `--geom`).
+That geometry column may hold either WKT (`POINT(...)`) **or** a GeoJSON geometry
+object (`{"type":"Polygon",...}`) — kenze detects which and parses it accordingly,
+so a spreadsheet of GeoJSON polygons converts straight to a `.geojson`. Reading a
+`.geojson` flattens the geometry into a WKT `geometry` column so it behaves like
+any other table.
 
 ```
 kenze convert places.csv     -o places.geojson              # auto lat/lon
@@ -1016,7 +1019,7 @@ kenze follows semantic versioning. The core stays small and grows one release at
 a time. Each release is built, checked, published to PyPI, and verified with a
 clean-environment install before being considered done.
 
-The current release is 0.8.3.
+The current release is 0.8.4.
 
 ---
 

@@ -2,6 +2,8 @@
 back with DuckDB's spatial extension so the geometry assertions reflect reality."""
 from __future__ import annotations
 
+import json
+
 import duckdb
 import pytest
 
@@ -70,3 +72,21 @@ def test_filter_then_geojson(geo, tmp_path):
     n = kenze.sift(geo, out, filter="id > 1")
     assert n == 2
     assert len(_read_geojson(out)) == 2
+
+
+def test_geojson_geometry_column(tmp_path):
+    # a 'coordinates' column holding a GeoJSON geometry object (not lat/lon or WKT)
+    poly = json.dumps({"type": "Polygon",
+                       "coordinates": [[[55.2, 25.1], [55.3, 25.1], [55.3, 25.2], [55.2, 25.1]]]})
+    src = _write_csv(tmp_path / "zones.csv", ["name", "coordinates"], [["Zone A", poly]])
+    out = fs(tmp_path / "zones.geojson")
+    kenze.sift(src, out)                     # 'coordinates' is auto-detected as the geometry
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial")
+    try:
+        n, gtype = con.execute(
+            f"SELECT count(*), any_value(ST_GeometryType(geom)) FROM ST_Read('{out}')"
+        ).fetchone()
+    finally:
+        con.close()
+    assert n == 1 and "POLYGON" in gtype.upper()

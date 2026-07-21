@@ -737,11 +737,22 @@ def h_convert(st, arg):
         return
     a = _split_args(arg)
     if not a:
-        _say("  usage: convert <name.csv|parquet|json|xlsx|geojson>", "warn")
-        _say("  changes format by the output extension (writes to the output folder)", "dim")
-        _say("  GeoJSON needs lat/lon columns (auto-detected), or:  convert out.geojson lat=<col> lon=<col>", "dim")
+        _say("  usage: convert <output.csv|parquet|json|xlsx|geojson>", "warn")
+        _say("  the loaded file is written to that name (format from the extension)", "dim")
+        _say("  GeoJSON: lat/lon auto-detected, or  convert out.geojson geom=<column>", "dim")
+        return
+    # the file is already loaded, so convert takes only the OUTPUT - catch the
+    # terminal form `convert input -o output` instead of silently mis-using it.
+    if any(t.lower() in ("-o", "--output") for t in a):
+        _say("  in the shell the file is already loaded - convert takes just the OUTPUT:", "warn")
+        _say("      convert out.geojson          (no input path, no -o)", "dim")
         return
     out = _out(a[0])
+    # never overwrite the file you loaded
+    if st.input and os.path.abspath(out) == os.path.abspath(st.input):
+        _say(f"  that would overwrite the file you loaded ({os.path.basename(st.input)}).", "warn")
+        _say("  give a different output name, e.g.  convert out.geojson", "dim")
+        return
     spec = st.build_spec(output=out)
     for t in a[1:]:
         low = t.lower()
@@ -752,7 +763,7 @@ def h_convert(st, arg):
         elif low.startswith("geom="):
             spec["geo_wkt"] = t.split("=", 1)[1]
         else:
-            _say(f"  ignoring unknown option: {t}", "warn")
+            _say(f"  ignoring unknown option: {t}  (GeoJSON uses lat=/lon=/geom=)", "warn")
     _say(f"  converting -> {out}", "accent")
     run_spec(spec, con=st.con, quiet=False, disk_check=st.disk_check)
 
