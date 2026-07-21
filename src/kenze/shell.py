@@ -93,6 +93,7 @@ COMMANDS = {
     "dryrun": ("OUT", "show what `run` would write (schema), without writing"),
     "save":   ("OUT", "save the pipeline as a reusable .dq recipe"),
     "run":    ("OUT", "run the pipeline and write an output file"),
+    "convert": ("OUT", "change file format (csv/parquet/json/xlsx/geojson)"),
     "pwd":    ("SHELL", "show the output folder (where run/save write)"),
     "cd":     ("SHELL", "change the output folder"),
     "set":    ("SHELL", "session settings: memory / threads / skip-bad / temp / disk-check"),
@@ -110,7 +111,7 @@ COLUMN_CMDS = {"keep", "drop", "filter", "rename", "cast", "fillna", "mask",
                "scale", "bin", "encode", "onehot", "clip-outliers", "dedup", "pivot",
                "unpivot", "split", "partition", "plot", "assert-unique", "assert-not-null"}
 # commands whose first argument is a file path -> path autocomplete
-FILE_CMDS = {"load", "open", "save", "run"}
+FILE_CMDS = {"load", "open", "save", "run", "convert"}
 # how a step maps into a recipe spec; the shell folds them in order
 _STEP_KEYS = {
     "keep": "keep", "drop": "drop", "clip": "bbox",
@@ -731,6 +732,31 @@ def h_run(st, arg):
     run_spec(spec, con=st.con, quiet=False, disk_check=st.disk_check, log=log)
 
 
+def h_convert(st, arg):
+    if _need_input(st):
+        return
+    a = _split_args(arg)
+    if not a:
+        _say("  usage: convert <name.csv|parquet|json|xlsx|geojson>", "warn")
+        _say("  changes format by the output extension (writes to the output folder)", "dim")
+        _say("  GeoJSON needs lat/lon columns (auto-detected), or:  convert out.geojson lat=<col> lon=<col>", "dim")
+        return
+    out = _out(a[0])
+    spec = st.build_spec(output=out)
+    for t in a[1:]:
+        low = t.lower()
+        if low.startswith("lat="):
+            spec["geo_lat"] = t.split("=", 1)[1]
+        elif low.startswith("lon="):
+            spec["geo_lon"] = t.split("=", 1)[1]
+        elif low.startswith("geom="):
+            spec["geo_wkt"] = t.split("=", 1)[1]
+        else:
+            _say(f"  ignoring unknown option: {t}", "warn")
+    _say(f"  converting -> {out}", "accent")
+    run_spec(spec, con=st.con, quiet=False, disk_check=st.disk_check)
+
+
 def h_pwd(st, arg):
     _say(f"  output folder:  {os.getcwd()}", "accent2")
     _say("  files from `run` / `save` land here (or give a full path)", "dim")
@@ -1087,7 +1113,7 @@ HANDLERS = {
     "count": h_count, "stats": h_stats, "plot": h_plot, "history": h_history,
     "steps": h_steps, "pipeline": h_steps,
     "undo": h_undo, "reset": h_reset, "sql": h_sql, "eject": h_eject,
-    "save": h_save, "run": h_run, "pwd": h_pwd, "cd": h_cd,
+    "save": h_save, "run": h_run, "convert": h_convert, "pwd": h_pwd, "cd": h_cd,
     "check": h_check, "validate": h_validate, "join": h_join, "diff": h_diff,
     "pivot": h_pivot, "unpivot": h_unpivot, "split": h_split,
     "partition": h_partition, "traintest": h_traintest, "dryrun": h_dryrun, "set": h_set,

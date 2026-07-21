@@ -54,6 +54,7 @@ progress bar. Everything the CLI can do is in the shell — see **[SHELL.md](htt
 - **Model-ready in one step** — `scale`, `bin`, `encode`, `onehot`, `clip-outliers`, and a reproducible `traintest` split turn a clean file into a model-ready dataset you hand straight to scikit-learn / XGBoost.
 - **See your data** — `plot amount --by city` draws an ASCII bar chart or histogram right in the terminal, so you spot skew and dirty data instantly.
 - **Excel in and out** — read and write `.xlsx` workbooks natively (`convert big.parquet -o report.xlsx`), no extra dependency.
+- **GeoJSON in and out** — `convert data.csv -o map.geojson` builds point geometry from lat/lon columns (auto-detected, or `--lat`/`--lon`/`--geom`); `convert map.geojson -o map.csv` flattens geometry back to WKT. Handy for prepping map layers.
 - **Messy CSVs, handled** — `--skip N` drops junk preamble rows; the shell even auto-detects and skips them for you.
 - **Readable recipes** (`.dq` files) that chain steps into one streaming pass, with `${VAR}` templating for scheduled jobs.
 - **Read and write the cloud directly** — `s3://`, `gs://`, `https://` — nothing to download first.

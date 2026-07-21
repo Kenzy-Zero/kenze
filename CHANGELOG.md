@@ -4,6 +4,17 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.3] - 2026-07-21
+
+### Added
+- **GeoJSON support.** `kenze convert data.csv -o data.geojson` writes GeoJSON —
+  the geometry is built from lat/lon columns (auto-detected, or `--lat`/`--lon`) or
+  from a WKT column (`--geom`). kenze now reads `.geojson` too (the geometry comes
+  back as a WKT `geometry` column), so `convert map.geojson -o map.csv` works. Any
+  command that writes a `.geojson` output gets it (e.g. `filter … -o out.geojson`).
+- **Shell `convert`.** The `convert` command is now available inside the interactive
+  shell (`convert out.xlsx`, `convert out.geojson`) — it was previously CLI-only.
+
 ## [0.8.2] - 2026-07-20
 
 ### Added

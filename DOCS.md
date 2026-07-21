@@ -2,7 +2,7 @@
 
 Big-file data preparation that never runs out of memory. No SQL required.
 
-Version 0.8.2
+Version 0.8.3
 
 ---
 
@@ -492,11 +492,29 @@ shell does not mistake it for an option, for example `--bbox=-10,35,5,45`.
 #### convert
 
 Rewrite a file in a different format, chosen by the output extension, without any
-other transformation.
+other transformation. Supports CSV, TSV, Parquet, JSON, Excel (`.xlsx`) and
+GeoJSON (`.geojson`), plus their `.gz` variants.
 
 ```
 kenze convert sales.parquet -o sales.csv
+kenze convert sales.csv     -o report.xlsx
 ```
+
+**GeoJSON.** Writing a `.geojson` needs a geometry. kenze builds it from a lat/lon
+pair (column names like `latitude`/`longitude`/`lat`/`lon` are auto-detected) or a
+WKT column, and you can name them explicitly with `--lat` / `--lon` / `--geom`.
+Reading a `.geojson` flattens the geometry into a WKT `geometry` column so it
+behaves like any other table.
+
+```
+kenze convert places.csv     -o places.geojson              # auto lat/lon
+kenze convert places.csv     -o places.geojson --lat Y --lon X
+kenze convert layer.geojson  -o layer.parquet               # geometry -> WKT
+```
+
+Any command that writes a `.geojson` output gets the same treatment (for example
+`kenze filter places.csv --where "amount > 0" -o hot.geojson`). GeoJSON support
+uses DuckDB's `spatial` extension, loaded automatically on first use.
 
 ### 6.4 Combining and reshaping
 
@@ -935,6 +953,7 @@ kenze reads and writes:
 - Parquet (`.parquet`, `.pq`)
 - JSON and newline-delimited JSON (`.json`, `.ndjson`)
 - Excel workbooks (`.xlsx`, `.xls`), read and written via DuckDB's `excel` extension
+- GeoJSON (`.geojson`), read and written via DuckDB's `spatial` extension (see `convert`)
 - Any of the above compressed with gzip (`.gz`), read and written transparently
 
 The format of an operation is determined by file extension, both for reading and
@@ -997,7 +1016,7 @@ kenze follows semantic versioning. The core stays small and grows one release at
 a time. Each release is built, checked, published to PyPI, and verified with a
 clean-environment install before being considered done.
 
-The current release is 0.8.2.
+The current release is 0.8.3.
 
 ---
 

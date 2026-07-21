@@ -172,7 +172,11 @@ def build_parser():
     _io(sp)
     sp.add_argument("--bbox", required=True,
                     help="min_lon,min_lat,max_lon,max_lat (use --bbox=-10,35,5,45 for negatives)")
-    _io(cmd("convert", help="change format (by output extension)"))
+    sp = cmd("convert", help="change format by output extension (CSV/Parquet/JSON/Excel/GeoJSON)")
+    _io(sp)
+    sp.add_argument("--lat", help="latitude column when writing GeoJSON points")
+    sp.add_argument("--lon", help="longitude column when writing GeoJSON points")
+    sp.add_argument("--geom", help="WKT geometry column when writing GeoJSON")
 
     # combine / reshape / fan-out
     sp = cmd("join", help="join two files on a key")
@@ -392,7 +396,10 @@ def _transform(a):
     elif a.cmd in _TRANSFORMS:
         attr, key = _TRANSFORMS[a.cmd]
         spec[key] = getattr(a, attr)
-    # convert = no transforms, just re-COPY to the new format
+    elif a.cmd == "convert":  # no transforms, just re-COPY to the new format
+        for attr, key in (("lat", "geo_lat"), ("lon", "geo_lon"), ("geom", "geo_wkt")):
+            if getattr(a, attr, None):
+                spec[key] = getattr(a, attr)
     _run(a, spec)
 
 

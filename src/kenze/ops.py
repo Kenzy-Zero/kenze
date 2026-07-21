@@ -66,6 +66,11 @@ def _source(path: str, skip_bad: bool = False, fmt: str = None,
     e = _ext(path)
     if e in (".xlsx", ".xls"):
         return f"read_xlsx({p})"
+    if e == ".geojson":
+        # flatten the geometry to WKT so it reads like a normal table (the caller
+        # loads the spatial extension). The write path turns WKT back into geometry.
+        return (f"(SELECT * EXCLUDE (geom), ST_AsText(geom) AS geometry "
+                f"FROM ST_Read({p}))")
 
     glob = _is_glob(path)
     # a recognisable-but-unsupported file type (.md, .pdf, .docx ...) -> a clear
@@ -75,7 +80,7 @@ def _source(path: str, skip_bad: bool = False, fmt: str = None,
     if e and e not in _READABLE and not is_remote(path):
         raise ValueError(
             f"kenze doesn't read '{e}' files. Supported formats: CSV, TSV, Parquet, "
-            f"JSON and Excel (.xlsx) - plus their .gz variants. If "
+            f"JSON, Excel (.xlsx) and GeoJSON (.geojson) - plus their .gz variants. If "
             f"'{os.path.basename(path)}' is really delimited text, rename it .csv."
         )
 
@@ -106,11 +111,18 @@ def _is_excel(path) -> bool:
     return isinstance(path, str) and _ext(path) in (".xlsx", ".xls")
 
 
-def ensure_excel(con, *paths):
-    """Load the DuckDB excel extension the first time an .xlsx path is used, so
-    reading and writing Excel workbooks just works."""
+def _is_geo(path) -> bool:
+    return isinstance(path, str) and _ext(path) == ".geojson"
+
+
+def ensure_read(con, *paths):
+    """Load the DuckDB extensions a set of paths needs, the first time they're
+    used: 'excel' for .xlsx/.xls, 'spatial' for .geojson - so reading and writing
+    those formats just works."""
     if any(_is_excel(p) for p in paths if p):
         load_extension(con, "excel")
+    if any(_is_geo(p) for p in paths if p):
+        load_extension(con, "spatial")
 
 
 def _ext(path: str) -> str:
@@ -496,6 +508,41 @@ def _copy_opts(path: str) -> str:
     return base + (", COMPRESSION 'gzip')" if gz else ")")
 
 
+def _geo_cols(cols):
+    """Guess the geometry source columns from a set of column names."""
+    low = {c.lower(): c for c in cols}
+    lat = next((low[n] for n in ("lat", "latitude", "y") if n in low), None)
+    lon = next((low[n] for n in ("lon", "lng", "long", "longitude", "x") if n in low), None)
+    wkt = next((low[n] for n in ("geometry", "geom", "wkt") if n in low), None)
+    return lat, lon, wkt
+
+
+def _geojson_write(con, q, spec):
+    """Wrap a query so it writes GeoJSON: build a geometry column from a WKT
+    column or a lat/lon pair (explicit hints, else auto-detected), and return the
+    wrapped query + GDAL copy options."""
+    cols = columns(con, f"({q})")
+    lat, lon, wkt = spec.get("geo_lat"), spec.get("geo_lon"), spec.get("geo_wkt")
+    if not (wkt or (lat and lon)):
+        alat, alon, awkt = _geo_cols(cols)
+        wkt = awkt
+        if not wkt:
+            lat, lon = alat, alon
+    if wkt:
+        geom, used = f"ST_GeomFromText({_ident(wkt)})", [wkt]
+    elif lat and lon:
+        geom, used = f"ST_Point({_ident(lon)}, {_ident(lat)})", [lat, lon]
+    else:
+        raise ValueError(
+            "to write GeoJSON the data needs geometry - a latitude/longitude pair "
+            "or a WKT column. Have columns named like latitude/longitude, or pass "
+            "--lat <col> --lon <col> (or --geom <wkt_col>)."
+        )
+    excl = ", ".join(_ident(c) for c in used)
+    wrapped = f"SELECT * EXCLUDE ({excl}), {geom} AS geometry FROM ({q}) _geo"
+    return wrapped, "(FORMAT GDAL, DRIVER 'GeoJSON')"
+
+
 def _disk_check(con, inputs, out, skip=False):
     if skip or out == "-":
         return
@@ -797,7 +844,7 @@ def run_spec(spec, con=None, quiet=False, disk_check=True, log=None, dry_run=Fal
     stdin_tmp = None
     try:
         ensure_remote(con, spec.get("input"), spec.get("output"))
-        ensure_excel(con, spec.get("input"), spec.get("output"))
+        ensure_read(con, spec.get("input"), spec.get("output"))
         _load_source_ext(con, spec.get("source_format"))
         if spec.get("input") == "-":
             stdin_tmp = _spool_stdin(temp_dir_of(con), spec.get("stdin_format", "csv"))
@@ -812,8 +859,13 @@ def run_spec(spec, con=None, quiet=False, disk_check=True, log=None, dry_run=Fal
 
         _run_asserts(con, q, spec)   # fail before writing anything
         _disk_check(con, [spec["input"]], out, skip=not disk_check)
-        opts = _copy_opts(out if out != "-" else "out.csv")
-        if spec.get("append") and out != "-" and not is_remote(out):
+        if _is_geo(out):
+            if out == "-":
+                raise ValueError("GeoJSON output to stdout ('-') isn't supported - give a file path.")
+            q, opts = _geojson_write(con, q, spec)
+        else:
+            opts = _copy_opts(out if out != "-" else "out.csv")
+        if spec.get("append") and out != "-" and not is_remote(out) and not _is_geo(out):
             n = _copy_append(con, q, out, opts)
         else:
             n = _copy(con, q, out, opts)
@@ -857,7 +909,7 @@ def profile(path, con=None, fmt=None, skip=0) -> int:
     con = con or connect()
     try:
         ensure_remote(con, path)
-        ensure_excel(con, path)
+        ensure_read(con, path)
         _load_source_ext(con, fmt)
         src = _source(path, fmt=fmt, skip=skip)
         schema = con.execute(f"DESCRIBE SELECT * FROM {src}").fetchall()
@@ -880,7 +932,7 @@ def stats(path, con=None, fmt=None, skip=0):
     con = con or connect()
     try:
         ensure_remote(con, path)
-        ensure_excel(con, path)
+        ensure_read(con, path)
         _load_source_ext(con, fmt)
         src = _source(path, fmt=fmt, skip=skip)
         rows = con.execute(f"SUMMARIZE SELECT * FROM {src}").fetchall()
@@ -911,7 +963,7 @@ def peek(path, n=20, con=None, fmt=None, skip=0):
     con = con or connect()
     try:
         ensure_remote(con, path)
-        ensure_excel(con, path)
+        ensure_read(con, path)
         _load_source_ext(con, fmt)
         src = _source(path, fmt=fmt, skip=skip)
         schema = con.execute(f"DESCRIBE SELECT * FROM {src}").fetchall()
@@ -955,7 +1007,7 @@ def check(path, con=None) -> int:
     con = con or connect()
     try:
         ensure_remote(con, path)
-        ensure_excel(con, path)
+        ensure_read(con, path)
         p = _source(path)
         if _ext(path) in ("", ".csv", ".tsv", ".txt", ".gz"):
             good = con.execute(
@@ -1112,7 +1164,7 @@ def plot(path, column, by=None, agg=None, bins=20, top=20, width=48, con=None, f
     con = con or connect()
     try:
         ensure_remote(con, path)
-        ensure_excel(con, path)
+        ensure_read(con, path)
         _load_source_ext(con, fmt)
         src = _source(path, fmt=fmt)
         return plot_from(con, src, column, by=by, agg=agg, bins=bins, top=top, width=width)
@@ -1231,7 +1283,7 @@ def join(left, right, on, how="inner", out=None, con=None, quiet=False, disk_che
     con = con or connect(progress=(not quiet) and _tty())
     try:
         ensure_remote(con, left, right, out)
-        ensure_excel(con, left, right, out)
+        ensure_read(con, left, right, out)
         keys = _aslist(on)
         using = "(" + ", ".join(_ident(k) for k in keys) + ")"
         how_sql = {"inner": "INNER", "left": "LEFT", "right": "RIGHT", "full": "FULL", "outer": "FULL"}
@@ -1335,7 +1387,7 @@ def pivot(input_path, on, values, agg="sum", group=None, out=None, con=None,
     con = con or connect(progress=(not quiet) and _tty())
     try:
         ensure_remote(con, input_path, out)
-        ensure_excel(con, input_path, out)
+        ensure_read(con, input_path, out)
         fn = str(agg).lower()
         fn = "avg" if fn == "mean" else fn
         if fn not in _AGGS:
@@ -1367,7 +1419,7 @@ def unpivot(input_path, cols, name="name", value="value", out=None, con=None,
     con = con or connect(progress=(not quiet) and _tty())
     try:
         ensure_remote(con, input_path, out)
-        ensure_excel(con, input_path, out)
+        ensure_read(con, input_path, out)
         collist = ", ".join(_ident(c) for c in _aslist(cols))
         q = (
             f"SELECT * FROM (SELECT * FROM {_source(input_path)}) _t "
@@ -1392,7 +1444,7 @@ def run_sql(query, out=None, con=None, quiet=False, disk_check=True):
     con = con or connect(progress=(not quiet) and _tty())
     try:
         if out:
-            ensure_excel(con, out)
+            ensure_read(con, out)
             t0 = time.time()
             n = _copy(con, query, out, _copy_opts(out if out != "-" else "out.csv"))
             if not quiet and out != "-":
@@ -1449,7 +1501,7 @@ def split(input_path, by, out_dir, fmt="csv", con=None, max_groups=2000):
     con = con or connect()
     try:
         ensure_remote(con, input_path)
-        ensure_excel(con, input_path, f"_.{str(fmt).lower().lstrip('.')}")
+        ensure_read(con, input_path, f"_.{str(fmt).lower().lstrip('.')}")
         src = _source(input_path)
         cols = columns(con, src)
         match = [c for c in cols if c.lower() == by.lower()]
@@ -1507,7 +1559,7 @@ def traintest(input_path, out_dir, ratio=0.8, seed=42, by=None, before=None,
     try:
         ensure_remote(con, input_path)
         ext = str(fmt).lower().lstrip(".")
-        ensure_excel(con, input_path, f"_.{ext}")
+        ensure_read(con, input_path, f"_.{ext}")
         src = _source(input_path)
         cols = columns(con, src)
 
