@@ -206,6 +206,17 @@ Run any of these as a one-liner, or run `kenze` and do it all interactively — 
 shell wraps every command above plus session helpers (`open`, `set`, `dryrun`,
 `pwd`/`cd`, `undo`, `steps`). See **[SHELL.md](https://github.com/Kenzy-Zero/kenze/blob/main/SHELL.md)** for the shell guide.
 
+## Documentation
+
+Full docs live in **[`docs/`](https://github.com/Kenzy-Zero/kenze/tree/main/docs)**:
+
+| doc | for |
+|---|---|
+| **[Python API reference](https://github.com/Kenzy-Zero/kenze/blob/main/docs/python-api.md)** | using kenze as a **library** (`import kenze`) — every public function, exact signatures, arguments, returns, examples. |
+| **[CLI reference](https://github.com/Kenzy-Zero/kenze/blob/main/DOCS.md)** | every command and flag, the memory model, cloud storage, recipes. |
+| **[Interactive shell](https://github.com/Kenzy-Zero/kenze/blob/main/SHELL.md)** | the live `kenze` session guide. |
+| **[Reports](https://github.com/Kenzy-Zero/kenze/blob/main/docs/report.md)** | `kenze report` — data file → styled PDF / HTML. |
+
 ## Performance
 
 The whole point of kenze is that it doesn't fall over on files bigger than your

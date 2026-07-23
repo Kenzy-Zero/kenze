@@ -4,6 +4,17 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.2] - 2026-07-23
+
+### Added
+- **A `docs/` folder** with detailed guides: a full **[Python API reference](docs/python-api.md)**
+  (every public function — exact signature, arguments, return value, example),
+  a **[reports guide](docs/report.md)**, and an **[index](docs/index.md)** that maps
+  all the docs. The README now links them prominently.
+- **`kenze.count` in the Python API** — the value-counts / group-by function is now
+  a documented, exported part of `import kenze` (alongside `sift`, `sql`, `count`,
+  `to_polars`, and the rest).
+
 ## [0.9.1] - 2026-07-23
 
 ### Added
