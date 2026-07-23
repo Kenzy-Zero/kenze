@@ -320,6 +320,26 @@ The command reports every column whose type does not match, every required
 column that is absent, and any nulls found in columns listed under `not_null`.
 It exits 0 when the file conforms and 1 when it does not.
 
+#### count
+
+Count how many rows fall under each value of a column — a no-SQL value-counts or
+group-by count, ordered from most frequent to least. Prints to the screen, or
+writes to a file with `-o`. The counting is done by DuckDB over the whole file, so
+it works on inputs far larger than memory.
+
+```
+kenze count sales.parquet city                     # print counts per city
+kenze count sales.parquet city --top 10 -o c.csv   # top 10, written to a file
+kenze count sales.parquet city --distinct user_id  # unique users per city
+kenze count sales.parquet city category            # group by two columns
+```
+
+Options:
+- `--top N` — keep only the top N groups.
+- `--distinct COL` — count the distinct values of another column per group (for
+  example unique users), instead of counting rows.
+- `-o PATH` — write the counts to a file instead of printing them.
+
 ### 6.2 Column operations
 
 #### keep
@@ -475,6 +495,24 @@ Keep the first N rows.
 ```
 kenze head sales.parquet --n 100 -o first.csv
 ```
+
+#### sort
+
+Order rows by one or more columns, optionally keeping only the first N. Combined
+with a limit this is the idiomatic way to take a "top N": sort descending and keep
+the head.
+
+```
+kenze sort sales.csv --by revenue --desc -o sorted.csv
+kenze sort sales.csv --by revenue --desc --top 10 -o top10.csv
+kenze sort sales.csv --by region,revenue:desc -o out.csv
+```
+
+Options:
+- `--by COLS` — one or more columns, comma-separated. Append `:desc` to a column
+  to sort it descending (for example `revenue:desc`).
+- `--desc` — sort every column descending (a shortcut).
+- `--top N` — keep only the first N rows after sorting.
 
 #### clip
 
@@ -685,6 +723,27 @@ kenze history --n 50     # the last 50
 
 Recording is silent and best-effort. Disable it for a single run with
 `--no-history`, or globally with the environment variable `KENZE_NO_HISTORY=1`.
+
+#### report
+
+Turn a data file into a styled PDF or HTML report — a header, summary tiles and a
+ranked table, auto-fit to your columns. HTML output needs only
+`pip install "kenze[report]"`; PDF renders that HTML with the Chrome or Edge
+already on the machine, so there is no extra download. `--per-row` produces one
+document per row (batch / mail-merge), and `--scaffold` writes a starter template
+pre-filled with your columns.
+
+```
+kenze report summary.csv -o report.pdf --set title="Q1 Review"
+kenze report summary.csv -o report.html
+kenze report customers.csv --per-row --format pdf -o docs/
+kenze report data.csv --scaffold -o template.html
+```
+
+The summary figures are DuckDB aggregates over the whole file (so they are exact
+even on very large inputs); the detail table is a bounded top-N (`--limit`). The
+full guide — themes, custom templates, the placeholder vocabulary and the Python
+entry point — is in **[docs/report.md](docs/report.md)**.
 
 ### 6.7 Recipes
 
