@@ -50,7 +50,7 @@ progress bar. Everything the CLI can do is in the shell — see **[SHELL.md](htt
 
 - **An interactive shell** (`kenze`) with a `/` command menu, live previews, schema-aware autocomplete, and data-quality guards — plus the same as a one-line CLI for scripts and cron.
 - **Process files bigger than your RAM** without crashing — memory is auto-capped and DuckDB spills to disk.
-- **41 CLI commands** for the everyday work: `keep`, `drop`, `filter`, `rename`, `cast`, `fillna`, `dedup`, `sample`, `count`, `sort`, `join`, `diff`, `pivot`, `split`, `partition`, and more — no SQL needed.
+- **40 CLI commands** for the everyday work: `keep`, `drop`, `filter`, `rename`, `cast`, `fillna`, `dedup`, `sample`, `count`, `sort`, `join`, `diff`, `pivot`, `split`, `partition`, and more — no SQL needed.
 - **Count & sort with zero SQL** — `kenze count sales.csv city --top 10` is a value-counts / group-by (`--distinct user` for unique users per group); `kenze sort sales.csv --by revenue --desc --top 10` orders and keeps the top N. Both chain in the shell pipeline.
 - **Model-ready in one step** — `scale`, `bin`, `encode`, `onehot`, `clip-outliers`, and a reproducible `traintest` split turn a clean file into a model-ready dataset you hand straight to scikit-learn / XGBoost.
 - **See your data** — `plot amount --by city` draws an ASCII bar chart or histogram right in the terminal, so you spot skew and dirty data instantly.
