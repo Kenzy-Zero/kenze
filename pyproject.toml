@@ -41,10 +41,11 @@ dependencies = ["duckdb>=1.2", "psutil>=5.9", "prompt_toolkit>=3.0"]
 polars = ["polars>=0.20"]
 arrow = ["pyarrow>=14"]
 pandas = ["pandas>=1.5"]
-all = ["polars>=0.20", "pyarrow>=14", "pandas>=1.5"]
 # turn a data file into a styled HTML/PDF report (kenze report). HTML needs only
 # Jinja2; PDF renders that HTML with the system Chrome/Edge (no extra install).
 report = ["jinja2>=3.0"]
+# everything optional: the dataframe bridges + report
+all = ["polars>=0.20", "pyarrow>=14", "pandas>=1.5", "jinja2>=3.0"]
 # contributor toolchain: `pip install -e ".[dev]"` then `pytest`
 dev = ["pytest>=7", "ruff", "build", "jinja2>=3.0"]
 
