@@ -26,7 +26,7 @@ KNOWN_KEYS = {
     "input", "output", "keep", "drop", "filter", "bbox",
     "types", "fillna", "mask", "mask_method", "rename",
     "scale", "bin", "encode", "onehot", "clip_outliers",
-    "dedup", "sample", "head",
+    "dedup", "sample", "head", "sort",
     "assert", "assert_unique", "assert_not_null",
 }
 
@@ -57,7 +57,8 @@ Steps (use only the ones you need, in any order):
   clip_outliers: amount:iqr, age:pct       cap extreme values / winsorize (iqr = Tukey 1.5 | pct = 1st-99th)
   dedup:    id                            drop duplicate rows (a column name, or: all)
   sample:   50000                         keep N random rows
-  head:     100                           keep the first N rows
+  sort:     revenue:desc, name            order rows by column(s); add :desc for descending
+  head:     100                           keep the first N rows (after sort = top N)
   assert:   row_count > 0                 fail the run unless this holds (uses row_count)
   assert_unique: id                       fail if these column(s) have duplicates
   assert_not_null: id, email              fail if these columns contain nulls

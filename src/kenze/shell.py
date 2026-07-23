@@ -55,7 +55,7 @@ COMMANDS = {
     "open":   ("LOOK", "open a saved .dq recipe into the session (view/edit/run)"),
     "peek":   ("LOOK", "preview the current data (first rows)"),
     "schema": ("LOOK", "show the current columns + types"),
-    "count":  ("LOOK", "count rows in the current pipeline"),
+    "count":  ("LOOK", "count rows, or per value of a column (count city)"),
     "stats":  ("LOOK", "per-column summary (min/max/nulls/unique)"),
     "plot":   ("LOOK", "quick ascii chart of a column (histogram / bar)"),
     "check":  ("LOOK", "integrity scan: readable? how many bad rows?"),
@@ -76,6 +76,7 @@ COMMANDS = {
     "clip":   ("SHAPE", "keep rows inside a lat/lon bbox"),
     "sample": ("SHAPE", "keep N random rows"),
     "head":   ("SHAPE", "keep only the first N rows"),
+    "sort":   ("SHAPE", "order rows by a column (sort revenue desc)"),
     "join":   ("COMBINE", "join the loaded file with another on a key"),
     "diff":   ("COMBINE", "compare the loaded file with another (added/removed/changed)"),
     "pivot":  ("COMBINE", "reshape long -> wide"),
@@ -111,7 +112,8 @@ GROUPS = [("LOOK", "look at data"), ("SHAPE", "shape it"),
 # commands whose arguments are (mostly) column names -> schema autocomplete
 COLUMN_CMDS = {"keep", "drop", "filter", "rename", "cast", "fillna", "mask",
                "scale", "bin", "encode", "onehot", "clip-outliers", "dedup", "pivot",
-               "unpivot", "split", "partition", "plot", "assert-unique", "assert-not-null"}
+               "unpivot", "split", "partition", "plot", "sort", "count",
+               "assert-unique", "assert-not-null"}
 # commands whose first argument is a file path -> path autocomplete
 FILE_CMDS = {"load", "open", "save", "run", "convert", "report"}
 # how a step maps into a recipe spec; the shell folds them in order
@@ -162,6 +164,7 @@ CMD_GUIDE = {
     "assert-unique":   ("column(s)", "assert-unique id", True, []),
     "assert-not-null": ("column(s)", "assert-not-null id", True, []),
     "clip-outliers": ("col:method", "clip-outliers amount:iqr", True, []),
+    "sort":    ("a column [desc]", "sort revenue desc", True, ["desc", "asc"]),
 }
 # commands that run immediately - nothing more to type, just Enter
 READY_ON_ENTER = {"peek", "schema", "count", "stats", "steps", "undo", "reset",
@@ -328,6 +331,7 @@ class ShellState:
         filters, casts, fills, renames = [], [], [], []
         asserts, auniq, anotnull = [], [], []
         scales, binspecs, encodes, onehots, clipouts = [], [], [], [], []
+        sorts = []
         for cmd, arg in self.steps:
             if cmd == "filter":
                 filters.append(arg)
@@ -353,6 +357,12 @@ class ShellState:
             elif cmd == "clip-outliers":
                 p = arg.split()
                 clipouts.append(p[0] if len(p) < 2 else f"{p[0]}:{p[1]}")
+            elif cmd == "sort":
+                p = arg.split()
+                if len(p) == 2 and p[1].lower() in ("desc", "asc"):
+                    sorts.append(f"{p[0]}:{p[1].lower()}")
+                else:
+                    sorts.append(arg.strip())
             elif cmd == "mask":
                 spec["mask"] = arg
                 spec.setdefault("mask_method", "hash")
@@ -382,6 +392,8 @@ class ShellState:
             spec["onehot"] = ", ".join(onehots)
         if clipouts:
             spec["clip_outliers"] = ", ".join(clipouts)
+        if sorts:
+            spec["sort"] = ", ".join(sorts)
         if asserts:
             spec["assert"] = asserts
         if auniq:
@@ -514,8 +526,25 @@ def h_schema(st, arg):
 def h_count(st, arg):
     if _need_input(st):
         return
-    n = st.con.execute(f"SELECT count(*) FROM ({st.current_query()}) _c").fetchone()[0]
-    _say(f"\n  {n:,} rows\n", "accent")
+    q = st.current_query()
+    col = (arg or "").strip()
+    if not col:
+        n = st.con.execute(f"SELECT count(*) FROM ({q}) _c").fetchone()[0]
+        _say(f"\n  {n:,} rows\n", "accent")
+        return
+    if col not in st.cols:
+        _say(f"  no column '{col}' - try  schema", "warn")
+        return
+    ident = '"' + col.replace('"', '""') + '"'
+    rows = st.con.execute(
+        f'SELECT {ident} AS v, count(*) AS n FROM ({q}) _c GROUP BY 1 ORDER BY n DESC LIMIT 30'
+    ).fetchall()
+    print()
+    _say(f"  {col}  (counts, top {len(rows)})", "head")
+    w = max((len(_s(v)) for v, _ in rows), default=1)
+    for v, n in rows:
+        _say(f"  {_s(v).ljust(w)}   {n:,}", "")
+    print()
 
 
 def h_stats(st, arg):
@@ -1265,7 +1294,7 @@ for _a in ("assert", "assert-unique", "assert-not-null"):
     HANDLERS[_a] = (lambda c: (lambda st, arg: _add_assert(st, c, arg)))(_a)
 for _c in ("keep", "drop", "filter", "rename", "cast", "fillna", "mask",
            "scale", "bin", "encode", "onehot", "clip-outliers", "dedup", "clip",
-           "sample", "head"):
+           "sample", "head", "sort"):
     HANDLERS[_c] = (lambda c: (lambda st, arg: _add_step(st, c, arg)))(_c)
 
 

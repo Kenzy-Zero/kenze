@@ -12,6 +12,7 @@ from . import __version__
 from .engine import connect
 from .ops import (
     check,
+    count,
     diff,
     eject,
     history,
@@ -108,6 +109,12 @@ def build_parser():
     sp.add_argument("--top", type=int, default=20, help="max bars to show")
     sp.add_argument("--width", type=int, default=48, help="bar width in characters")
     cmd("check", help="pre-flight file-integrity scan").add_argument("input")
+    sp = cmd("count", help="count rows per value of a column (no-SQL group-by / value-counts)")
+    sp.add_argument("input")
+    sp.add_argument("by", nargs="+", help="column(s) to group by")
+    sp.add_argument("-o", "--output", help="write the counts to a file (omit to print)")
+    sp.add_argument("--top", type=int, help="keep only the top N (e.g. --top 10)")
+    sp.add_argument("--distinct", help="count DISTINCT values of this column per group (unique users)")
     sp = cmd("validate", help="check a file against a target schema json")
     sp.add_argument("input")
     sp.add_argument("--schema", required=True)
@@ -169,6 +176,11 @@ def build_parser():
     sp = cmd("head", help="first N rows")
     _io(sp)
     sp.add_argument("--n", type=int, required=True)
+    sp = cmd("sort", help="order rows by column(s), optionally keep the top N")
+    _io(sp)
+    sp.add_argument("--by", required=True, help="column(s), comma-separated; add :desc (e.g. revenue:desc)")
+    sp.add_argument("--desc", action="store_true", help="sort every column descending (shortcut)")
+    sp.add_argument("--top", type=int, help="keep only the first N rows after sorting")
     sp = cmd("clip", help="keep only rows inside a lat/lon bounding box")
     _io(sp)
     sp.add_argument("--bbox", required=True,
@@ -359,6 +371,9 @@ def _combine(a):
                quiet=a.quiet)
     elif a.cmd == "sql":
         run_sql(a.query, out=a.output, con=_con(a), quiet=a.quiet, disk_check=not a.no_disk_check)
+    elif a.cmd == "count":
+        count(a.input, a.by, out=a.output, distinct=a.distinct, top=a.top, con=_con(a),
+              quiet=a.quiet, fmt=a.source_format, skip=a.skip or 0, disk_check=not a.no_disk_check)
     elif a.cmd == "eject":
         with open(a.recipe, "r", encoding="utf-8") as f:
             spec = parse_recipe(f.read())
@@ -415,6 +430,13 @@ def _transform(a):
     elif a.cmd == "clip-outliers":
         cols = [c.strip() for c in a.cols.split(",") if c.strip()]
         spec["clip_outliers"] = ", ".join(f"{c}:{a.method}" for c in cols)
+    elif a.cmd == "sort":
+        by = [c.strip() for c in a.by.split(",") if c.strip()]
+        if a.desc:
+            by = [c if ":" in c else f"{c}:desc" for c in by]
+        spec["sort"] = ", ".join(by)
+        if a.top:
+            spec["head"] = a.top
     elif a.cmd in _TRANSFORMS:
         attr, key = _TRANSFORMS[a.cmd]
         spec[key] = getattr(a, attr)

@@ -4,6 +4,24 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.1] - 2026-07-23
+
+### Added
+- **`count` - no-SQL value-counts / group-by count.** `kenze count sales.csv city`
+  counts rows per value (biggest first), printed or written with `-o`.
+  - `--top N` keeps only the top N groups (`kenze count sales.csv city --top 10`).
+  - `--distinct col` counts *unique* values of another column per group
+    (e.g. unique users per city) instead of rows.
+  - `count city category` groups by more than one column.
+  - Also in the shell: `count` alone counts rows; `count city` gives value-counts.
+  - Pairs with `report`: `kenze count data.csv city --top 10 -o c.csv` then
+    `kenze report c.csv -o out.pdf` - a counts report with no SQL.
+- **`sort` - order rows by column(s), a real pipeline step.** `kenze sort sales.csv
+  --by revenue --desc --top 10 -o top.csv`. `--by` takes one or more columns
+  (add `:desc` per column), `--desc` sorts all descending, `--top N` keeps the
+  first N (so **sort + top = top N**). Works as a recipe step and stacks in the
+  shell pipeline (`load ... -> sort revenue desc -> head 10 -> report out.pdf`).
+
 ## [0.9.0] - 2026-07-23
 
 ### Added

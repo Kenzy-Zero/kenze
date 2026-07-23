@@ -58,7 +58,7 @@ clears them all (the file stays loaded), and loading a new file starts fresh.
 | `open <recipe.dq>` | open a saved recipe into the session to view, tweak (`undo` / add steps) and run |
 | `peek [n]` | preview the first rows (default 10) of the current pipeline |
 | `schema` | the current columns and their types |
-| `count` | how many rows the current pipeline produces |
+| `count [col]` | how many rows the current pipeline produces; `count city` gives a value-counts (top values + counts) of a column |
 | `stats` | per-column summary: min / max / nulls / approx-unique |
 | `plot <col> [by <cat>]` | an ascii chart of the **live pipeline**: `plot amount` (histogram / value-counts), or `plot amount by city` / `plot amount city` (bar chart of an aggregate per category). Options: `agg sum\|count\|avg\|...`, `bins N`, `top N` |
 | `check [file]` | integrity scan: readable? how many malformed rows? |
@@ -82,6 +82,7 @@ clears them all (the file stays loaded), and loading a new file starts fresh.
 | `dedup [cols]` | `dedup id` | drop duplicate rows (a column, or `dedup` for whole-row) |
 | `clip <bbox>` | `clip 54,24,56,26` | keep rows inside a lon/lat box (min_lon,min_lat,max_lon,max_lat) |
 | `sample <n>` | `sample 1000` | keep N random rows |
+| `sort <col> [desc]` | `sort revenue desc` | order rows by a column (stack with `head` for top-N) |
 | `head <n>` | `head 100` | keep the first N rows |
 
 ### Combine, reshape and split (operate on the loaded file)

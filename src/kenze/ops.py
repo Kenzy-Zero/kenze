@@ -486,6 +486,19 @@ def build_query(con, spec) -> str:
     if spec.get("sample"):
         q = f"SELECT * FROM ({q}) _q USING SAMPLE {int(spec['sample'])} ROWS"
 
+    # sort = 'col' | 'col:desc' | 'col1, col2:desc'  (applied before head, so
+    # sort + head = top N)
+    if spec.get("sort"):
+        parts = []
+        for item in _aslist(spec["sort"]):
+            if ":" in item:
+                c, d = item.split(":", 1)
+                direction = "DESC" if d.strip().lower().startswith("desc") else "ASC"
+                parts.append(f"{_ident(c.strip())} {direction}")
+            else:
+                parts.append(_ident(item))
+        q = f"SELECT * FROM ({q}) _q ORDER BY {', '.join(parts)}"
+
     if spec.get("head"):
         q = f"SELECT * FROM ({q}) _q LIMIT {int(spec['head'])}"
 
@@ -1467,6 +1480,41 @@ def run_sql(query, out=None, con=None, quiet=False, disk_check=True):
         if len(rows) > 50:
             print(f"  ... {len(rows) - 50:,} more rows")
         return len(rows)
+    finally:
+        if own:
+            con.close()
+
+
+def count(path, by, out=None, distinct=None, top=None, con=None, quiet=False,
+          fmt=None, skip=0, disk_check=True):
+    """No-SQL value-counts / GROUP BY count: how many rows per value(s) of a
+    column, biggest first. `top` keeps only the top N groups. `distinct` counts
+    unique values of another column per group (e.g. unique users per city)
+    instead of rows. Print, or write with out."""
+    own = con is None
+    con = con or connect(progress=(not quiet) and _tty())
+    try:
+        ensure_read(con, path)
+        if fmt:
+            _load_source_ext(con, fmt)
+        src = _source(path, fmt=fmt, skip=skip or 0)
+        cols = columns(con, src)
+        by_list = _aslist(by)
+        missing = [c for c in by_list if c not in cols]
+        if missing:
+            raise ValueError(f"no column '{missing[0]}' in {os.path.basename(path)}. "
+                             f"columns: {', '.join(cols)}")
+        group = ", ".join(_ident(c) for c in by_list)
+        if distinct:
+            if distinct not in cols:
+                raise ValueError(f"no column '{distinct}' to count. columns: {', '.join(cols)}")
+            agg = f'count(DISTINCT {_ident(distinct)}) AS "count"'
+        else:
+            agg = 'count(*) AS "count"'
+        q = f'SELECT {group}, {agg} FROM {src} GROUP BY {group} ORDER BY "count" DESC'
+        if top:
+            q += f" LIMIT {int(top)}"
+        return run_sql(q, out=out, con=con, quiet=quiet, disk_check=disk_check)
     finally:
         if own:
             con.close()

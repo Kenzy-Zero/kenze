@@ -50,7 +50,8 @@ progress bar. Everything the CLI can do is in the shell — see **[SHELL.md](htt
 
 - **An interactive shell** (`kenze`) with a `/` command menu, live previews, schema-aware autocomplete, and data-quality guards — plus the same as a one-line CLI for scripts and cron.
 - **Process files bigger than your RAM** without crashing — memory is auto-capped and DuckDB spills to disk.
-- **39 CLI commands** for the everyday work: `keep`, `drop`, `filter`, `rename`, `cast`, `fillna`, `dedup`, `sample`, `join`, `diff`, `pivot`, `split`, `partition`, and more — no SQL needed.
+- **41 CLI commands** for the everyday work: `keep`, `drop`, `filter`, `rename`, `cast`, `fillna`, `dedup`, `sample`, `count`, `sort`, `join`, `diff`, `pivot`, `split`, `partition`, and more — no SQL needed.
+- **Count & sort with zero SQL** — `kenze count sales.csv city --top 10` is a value-counts / group-by (`--distinct user` for unique users per group); `kenze sort sales.csv --by revenue --desc --top 10` orders and keeps the top N. Both chain in the shell pipeline.
 - **Model-ready in one step** — `scale`, `bin`, `encode`, `onehot`, `clip-outliers`, and a reproducible `traintest` split turn a clean file into a model-ready dataset you hand straight to scikit-learn / XGBoost.
 - **See your data** — `plot amount --by city` draws an ASCII bar chart or histogram right in the terminal, so you spot skew and dirty data instantly.
 - **Excel in and out** — read and write `.xlsx` workbooks natively (`convert big.parquet -o report.xlsx`), no extra dependency.
@@ -105,6 +106,10 @@ kenze split    sales.parquet --by city -o by_city/    # one file per value
 kenze partition sales.parquet --by year -o lake/      # hive year=2026/ folders
 kenze convert  sales.parquet -o report.xlsx          # write a real Excel workbook
 kenze keep     messy.csv --cols id,amount --skip 3 -o clean.csv  # drop junk preamble
+
+kenze count    sales.parquet city --top 10 -o city_counts.csv        # value-counts, no SQL
+kenze count    sales.parquet city --distinct user_id                 # unique users per city
+kenze sort     sales.csv --by revenue --desc --top 10 -o top.csv     # order + keep top N
 
 kenze report   summary.csv -o report.pdf --set title="Q1 Review"     # styled PDF report
 kenze report   invoices.csv --per-row --format pdf -o docs/          # one PDF per row (batch)
@@ -195,7 +200,7 @@ tbl = kenze.to_arrow("SELECT city, count(*) FROM 'big.parquet' GROUP BY 1")   # 
 `profile` · `peek` · `stats` · `plot` · `check` · `validate` · `keep` · `drop` · `rename` · `cast` ·
 `fillna` · `mask` · `scale` · `bin` · `encode` · `onehot` · `clip-outliers` · `filter` · `dedup` ·
 `sample` · `head` · `clip` · `convert` · `join` · `diff` · `pivot` · `unpivot` · `split` ·
-`partition` · `traintest` · `report` · `sql` · `eject` · `init` · `run` · `recipe` · `history`
+`partition` · `traintest` · `count` · `sort` · `report` · `sql` · `eject` · `init` · `run` · `recipe` · `history`
 
 Run any of these as a one-liner, or run `kenze` and do it all interactively — the
 shell wraps every command above plus session helpers (`open`, `set`, `dryrun`,
