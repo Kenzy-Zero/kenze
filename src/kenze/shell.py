@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 
 from . import __version__
 from .engine import connect
@@ -94,6 +95,7 @@ COMMANDS = {
     "save":   ("OUT", "save the pipeline as a reusable .dq recipe"),
     "run":    ("OUT", "run the pipeline and write an output file"),
     "convert": ("OUT", "change file format (csv/parquet/json/xlsx/geojson)"),
+    "report": ("OUT", "turn the current data into a styled PDF/HTML report"),
     "pwd":    ("SHELL", "show the output folder (where run/save write)"),
     "cd":     ("SHELL", "change the output folder"),
     "set":    ("SHELL", "session settings: memory / threads / skip-bad / temp / disk-check"),
@@ -111,7 +113,7 @@ COLUMN_CMDS = {"keep", "drop", "filter", "rename", "cast", "fillna", "mask",
                "scale", "bin", "encode", "onehot", "clip-outliers", "dedup", "pivot",
                "unpivot", "split", "partition", "plot", "assert-unique", "assert-not-null"}
 # commands whose first argument is a file path -> path autocomplete
-FILE_CMDS = {"load", "open", "save", "run", "convert"}
+FILE_CMDS = {"load", "open", "save", "run", "convert", "report"}
 # how a step maps into a recipe spec; the shell folds them in order
 _STEP_KEYS = {
     "keep": "keep", "drop": "drop", "clip": "bbox",
@@ -143,6 +145,7 @@ CMD_GUIDE = {
     "join":    ("a file + on <key>", "join other.csv on id", True, []),
     "run":     ("an output file", "run clean.csv", True, ["append", "errors", "log"]),
     "convert": ("an output file", "convert out.geojson", True, ["geom=", "lat=", "lon="]),
+    "report":  ("an output file", "report out.pdf", True, ["theme=", "title=", "currency="]),
     "save":    ("a recipe file", "save clean.dq", True, []),
     "eject":   ("nothing (Enter to print), or a file", "eject out.sql", False, ["python"]),
     "set":     ("a setting", "set memory 4GB", True,
@@ -847,6 +850,53 @@ def h_convert(st, arg):
     run_spec(spec, con=st.con, quiet=False, disk_check=st.disk_check)
 
 
+def h_report(st, arg):
+    if _need_input(st):
+        return
+    a = _split_args(arg)
+    if not a:
+        _say("  usage: report <out.pdf|out.html>  [theme=report|scorecard] [title=..] [currency=..]", "warn")
+        _say("  turns the current data into a styled report (PDF via your browser, or HTML)", "dim")
+        _say("  batch (one doc per row) is CLI-only: kenze report data.csv --per-row -o dir/", "dim")
+        return
+    if any(t.lower() in ("-o", "--output") for t in a):
+        _say("  in the shell just give the output file:  report out.pdf", "warn")
+        return
+    out = _out(a[0])
+    if st.input and os.path.abspath(out) == os.path.abspath(st.input):
+        _say("  that would overwrite the file you loaded - give a different name.", "warn")
+        return
+    theme, variables = "report", {}
+    for t in a[1:]:
+        if t.lower().startswith("theme="):
+            theme = t.split("=", 1)[1]
+        elif "=" in t:
+            k, v = t.split("=", 1)
+            variables[k.strip()] = v
+        else:
+            _say(f"  ignoring: {t}  (options: theme=, title=, client=, currency=)", "warn")
+    from .report import report
+    # report on the CURRENT pipeline: with steps, materialise them to a temp file
+    # first so the report reflects the transformed data; otherwise read the input.
+    src, tmp, rep_fmt = st.input, None, st.source_format
+    if st.steps:
+        tmp = os.path.join(tempfile.gettempdir(), "kenze_report_src.parquet")
+        run_spec(st.build_spec(output=tmp), con=st.con, quiet=True, disk_check=st.disk_check)
+        src, rep_fmt = tmp, None
+    _say(f"  building report -> {out}", "accent")
+    try:
+        report(src, output=out, theme=theme, variables=variables, con=st.con, fmt=rep_fmt)
+        _say(f"  done -> {out}", "ok")
+    except (ValueError, OSError) as e:
+        _say(f"  {e}", "err")
+    finally:
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
 def h_pwd(st, arg):
     _say(f"  output folder:  {os.getcwd()}", "accent2")
     _say("  files from `run` / `save` land here (or give a full path)", "dim")
@@ -1203,7 +1253,8 @@ HANDLERS = {
     "count": h_count, "stats": h_stats, "plot": h_plot, "history": h_history,
     "steps": h_steps, "pipeline": h_steps,
     "undo": h_undo, "reset": h_reset, "sql": h_sql, "eject": h_eject,
-    "save": h_save, "run": h_run, "convert": h_convert, "pwd": h_pwd, "cd": h_cd,
+    "save": h_save, "run": h_run, "convert": h_convert, "report": h_report,
+    "pwd": h_pwd, "cd": h_cd,
     "check": h_check, "validate": h_validate, "join": h_join, "diff": h_diff,
     "pivot": h_pivot, "unpivot": h_unpivot, "split": h_split,
     "partition": h_partition, "traintest": h_traintest, "dryrun": h_dryrun, "set": h_set,

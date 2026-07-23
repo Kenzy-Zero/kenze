@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ card.title }} - {{ meta.client }}</title>
+<style>
+  @page { size:A5; margin:12mm; }
+  :root{--ink:#16181d;--gold:#c79a24;--line:#e7e2d7;--good:#1f8a4c;--bad:#c0392b;--wash:#faf8f2}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#eceae4;color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,sans-serif;font-variant-numeric:tabular-nums}
+  .card{max-width:148mm;margin:22px auto;background:#fff;padding:20mm 18mm;box-shadow:0 8px 30px rgba(0,0,0,.14)}
+  @media print{body{background:#fff}.card{margin:0;box-shadow:none;padding:0}}
+  .brandrule{width:40px;height:5px;background:var(--gold);margin-bottom:12px}
+  .eyebrow{font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:#8a8577;font-weight:600}
+  h1{font-family:Georgia,serif;font-size:27px;margin:6px 0 2px;letter-spacing:-.01em;text-wrap:balance}
+  .sub{color:#6f6a5c;font-size:13px;margin:0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:24px 0}
+  .metric{border:1px solid var(--line);border-left:3px solid var(--gold);padding:13px 15px;background:var(--wash)}
+  .metric .lab{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:#8a8577;font-weight:600}
+  .metric .val{font-size:22px;font-weight:700;margin-top:6px}
+  .metric .val.up{color:var(--good)}.metric .val.down{color:var(--bad)}
+  .vs{margin-top:18px;font-size:12.5px;line-height:2;border-top:1px solid var(--line);padding-top:14px}
+  .vs .k{color:#8a8577} .up{color:var(--good);font-weight:600}.down{color:var(--bad);font-weight:600}
+  .foot{margin-top:22px;font-size:10.5px;color:#9a9486}
+  .foot b{color:var(--gold)}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="brandrule"></div>
+  <div class="eyebrow">{{ meta.client }} &middot; Scorecard</div>
+  <h1>{{ card.title }}</h1>
+  {% if card.subtitle %}<p class="sub">{{ card.subtitle }}</p>{% endif %}
+
+  <div class="grid">
+    {% for t in card.tiles %}
+    <div class="metric">
+      <div class="lab">{{ t.label }}</div>
+      <div class="val {{ t.tone }}">{{ t.value }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if card.compare %}
+  <div class="vs">
+    {% for c in card.compare %}
+    <div><span class="k">{{ c.label }}&nbsp;</span><span class="{{ c.tone }}">{{ c.value }}</span></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="foot">Generated with <b>kenze</b> &middot; one page per row from {{ rows|length }}+ records</div>
+</div>
+</body>
+</html>

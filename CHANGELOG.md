@@ -4,6 +4,25 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-07-23
+
+### Added
+- **`kenze report` — turn a data file into a styled PDF or HTML report.** Point it
+  at a file and it auto-detects your columns (a label, a headline "revenue" metric,
+  a growth/percent column) and lays out KPI tiles + a ranked table. The summary is
+  computed with DuckDB aggregates over the **whole** file (never-OOM); the detail
+  table is a bounded top-N (`--limit`), so a 60M-row file still renders instantly.
+  - `kenze report data.csv -o out.pdf` — built-in theme to PDF (or `-o out.html`).
+  - `--per-row --format pdf -o docs/` — **one document per row** (batch / mail-merge).
+  - `--scaffold` — writes a starter HTML template *pre-filled with your column names*,
+    so you never guess placeholders (`{{ r.col }}`, `{{ stats.col.sum }}`, `{{ meta.title }}`).
+  - `--template mine.html` — bring your own HTML (Jinja2); `--theme report|scorecard`;
+    `--set title=... client=... currency=... period=...` for the headings.
+  - Available in the **interactive shell** too: `report out.pdf`.
+- **PDF with no heavy install.** HTML output needs only Jinja2 (`pip install "kenze[report]"`).
+  PDF renders that HTML with the system Chrome/Edge (pixel-perfect, zero extra
+  install), and falls back to WeasyPrint if it's installed.
+
 ## [0.8.5] - 2026-07-21
 
 ### Added

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ meta.title }}</title>
+<style>
+  @page { size:A4; margin:18mm 16mm; }
+  :root{--ink:#16181d;--line:#e7e2d7;--gold:#c79a24;--wash:#faf8f2;--good:#1f8a4c;--bad:#c0392b}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#eceae4;color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,sans-serif;
+    font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+  .page{max-width:210mm;margin:22px auto;background:#fff;padding:26mm 20mm;box-shadow:0 8px 40px rgba(0,0,0,.14)}
+  @media print{body{background:#fff}.page{margin:0;box-shadow:none;padding:0}}
+  .brandrule{width:46px;height:5px;background:var(--gold);margin-bottom:14px}
+  .mast{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid var(--ink);padding-bottom:14px}
+  .eyebrow{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#8a8577;font-weight:600}
+  h1{font-family:Georgia,"Times New Roman",serif;font-weight:600;font-size:31px;line-height:1.05;
+    margin:6px 0 4px;letter-spacing:-.01em;text-wrap:balance;max-width:16ch}
+  .sub{color:#6f6a5c;font-size:13px;margin:0}
+  .metaright{text-align:right;font-size:12px;color:#6f6a5c;line-height:1.7}
+  .metaright b{color:var(--ink)}
+  .kpis{display:grid;grid-template-columns:repeat({{ kpis|length or 1 }},1fr);gap:14px;margin:26px 0 30px}
+  .tile{border:1px solid var(--line);border-top:3px solid var(--gold);padding:15px 16px;background:var(--wash)}
+  .tile .lab{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:#8a8577;font-weight:600}
+  .tile .val{font-size:24px;font-weight:700;margin-top:7px;letter-spacing:-.02em}
+  .tile .val.up{color:var(--good)}.tile .val.down{color:var(--bad)}
+  .tile .note{font-size:11px;color:#8a8577;margin-top:3px}
+  .sec{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#8a8577;font-weight:700;
+    margin:0 0 12px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#9a9486;font-weight:600;
+    padding:0 10px 9px;border-bottom:1px solid var(--line);text-align:left}
+  th.r,td.r{text-align:right}
+  td{padding:11px 10px;border-bottom:1px solid #f1ede4;vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .lead{font-weight:600}
+  .rank{color:#b8b2a3;width:20px}
+  .bar{position:relative;height:6px;background:#efeadd;border-radius:3px;margin-top:5px}
+  .bar>i{position:absolute;inset:0 auto 0 0;background:var(--gold);border-radius:3px}
+  .chip{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px}
+  .chip.up{background:#e6f4ec;color:var(--good)}.chip.down{background:#fbeae8;color:var(--bad)}
+  .foot{margin-top:30px;padding-top:12px;border-top:1px solid var(--line);display:flex;
+    justify-content:space-between;font-size:11px;color:#9a9486}
+  .foot b{color:var(--gold)}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="brandrule"></div>
+  <header class="mast">
+    <div>
+      <div class="eyebrow">{{ meta.client }}</div>
+      <h1>{{ meta.title }}</h1>
+      <p class="sub">{{ meta.subtitle }}</p>
+    </div>
+    <div class="metaright">
+      {% if meta.date %}<div>Prepared&nbsp; <b>{{ meta.date }}</b></div>{% endif %}
+      <div>Records&nbsp; <b>{{ rows|length }}</b></div>
+      {% if meta.period %}<div>Period&nbsp; <b>{{ meta.period }}</b></div>{% endif %}
+    </div>
+  </header>
+
+  <section class="kpis">
+    {% for k in kpis %}
+    <div class="tile">
+      <div class="lab">{{ k.label }}</div>
+      <div class="val {{ k.tone }}">{{ k.value }}</div>
+      <div class="note">{{ k.note }}</div>
+    </div>
+    {% endfor %}
+  </section>
+
+  <h2 class="sec">{{ meta.table_title }}</h2>
+  <table>
+    <thead><tr><th></th>
+      {% for c in columns %}<th class="{{ c.align }}">{{ c.label }}</th>{% endfor %}
+    </tr></thead>
+    <tbody>
+      {% for disp, raw in table %}
+      <tr>
+        <td class="rank">{{ loop.index }}</td>
+        {% for c in columns %}
+          <td class="{{ c.align }} {{ 'lead' if c.key == label_col else '' }}">
+            {% if c.key == bar_col %}
+              {{ disp[c.key] }}<div class="bar"><i style="width:{{ (raw[c.key] / max_bar * 100)|round(0,'floor') if max_bar else 0 }}%"></i></div>
+            {% elif c.key == delta_col %}
+              <span class="chip {{ 'up' if (raw[c.key] or 0) >= 0 else 'down' }}">{{ disp[c.key] }}</span>
+            {% else %}
+              {{ disp[c.key] }}
+            {% endif %}
+          </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <footer class="foot">
+    <div>{{ meta.client }} &nbsp;&middot;&nbsp; {{ meta.title }}</div>
+    <div>Generated with <b>kenze</b></div>
+  </footer>
+</div>
+</body>
+</html>

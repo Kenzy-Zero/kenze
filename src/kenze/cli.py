@@ -32,6 +32,7 @@ from .ops import (
 )
 from .recipe import REFERENCE
 from .recipe import parse as parse_recipe
+from .report import report
 
 # global flags backfilled after parsing (SUPPRESS keeps them working both
 # before AND after the subcommand without clobbering each other)
@@ -241,6 +242,21 @@ def build_parser():
     sp = cmd("history", help="show recent kenze runs (input -> output, rows, time)")
     sp.add_argument("--n", type=int, default=20, help="how many recent runs to show")
 
+    sp = cmd("report", help="turn a data file into a styled HTML/PDF report")
+    sp.add_argument("input")
+    sp.add_argument("-o", "--output", help="output .html/.pdf file (or a DIRECTORY for --per-row)")
+    sp.add_argument("--template", help="your own HTML (Jinja2) template instead of a built-in theme")
+    sp.add_argument("--theme", default="report", help="built-in theme: report | scorecard")
+    sp.add_argument("--per-row", action="store_true", dest="per_row",
+                    help="one document per row (batch / mail-merge)")
+    sp.add_argument("--scaffold", action="store_true",
+                    help="write a starter template pre-filled with your columns (stdout or -o)")
+    sp.add_argument("--format", default="html", dest="report_format",
+                    help="--per-row output type: html | pdf (single reports use the -o extension)")
+    sp.add_argument("--limit", type=int, default=500, help="max rows in the detail table")
+    sp.add_argument("--set", action="append", default=[], dest="report_vars", metavar="K=V",
+                    help="template variable, repeatable: title, client, subtitle, currency, date, period")
+
     cmd("recipe", help="show the recipe (.dq) format and every valid step")
     cmd("shell", help="interactive session: / command menu, live previews, build a recipe")
     return p
@@ -335,6 +351,12 @@ def _combine(a):
             con.close()
     elif a.cmd == "diff":
         diff(a.old, a.new, a.on, out=a.output, con=_con(a))
+    elif a.cmd == "report":
+        report(a.input, output=a.output, template=a.template, theme=a.theme,
+               per_row=a.per_row, scaffold=a.scaffold, fmt_out=a.report_format,
+               variables=dict(kv.split("=", 1) for kv in a.report_vars if "=" in kv),
+               con=_con(a), fmt=a.source_format, skip=a.skip or 0, limit=a.limit,
+               quiet=a.quiet)
     elif a.cmd == "sql":
         run_sql(a.query, out=a.output, con=_con(a), quiet=a.quiet, disk_check=not a.no_disk_check)
     elif a.cmd == "eject":

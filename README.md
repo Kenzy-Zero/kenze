@@ -50,11 +50,12 @@ progress bar. Everything the CLI can do is in the shell — see **[SHELL.md](htt
 
 - **An interactive shell** (`kenze`) with a `/` command menu, live previews, schema-aware autocomplete, and data-quality guards — plus the same as a one-line CLI for scripts and cron.
 - **Process files bigger than your RAM** without crashing — memory is auto-capped and DuckDB spills to disk.
-- **38 CLI commands** for the everyday work: `keep`, `drop`, `filter`, `rename`, `cast`, `fillna`, `dedup`, `sample`, `join`, `diff`, `pivot`, `split`, `partition`, and more — no SQL needed.
+- **39 CLI commands** for the everyday work: `keep`, `drop`, `filter`, `rename`, `cast`, `fillna`, `dedup`, `sample`, `join`, `diff`, `pivot`, `split`, `partition`, and more — no SQL needed.
 - **Model-ready in one step** — `scale`, `bin`, `encode`, `onehot`, `clip-outliers`, and a reproducible `traintest` split turn a clean file into a model-ready dataset you hand straight to scikit-learn / XGBoost.
 - **See your data** — `plot amount --by city` draws an ASCII bar chart or histogram right in the terminal, so you spot skew and dirty data instantly.
 - **Excel in and out** — read and write `.xlsx` workbooks natively (`convert big.parquet -o report.xlsx`), no extra dependency.
 - **GeoJSON in and out** — `convert data.csv -o map.geojson` builds point geometry from lat/lon columns (auto-detected, or `--lat`/`--lon`/`--geom`); `convert map.geojson -o map.csv` flattens geometry back to WKT. Handy for prepping map layers.
+- **Client-ready reports** — `kenze report data.csv -o out.pdf` turns a data file into a styled PDF/HTML report (KPI tiles + a ranked table, auto-fit to your columns); `--per-row` makes one document per row (batch / mail-merge), and `--template`/`--scaffold` let you bring your own HTML. Needs `pip install "kenze[report]"`; PDF renders with your system browser — no heavy install.
 - **Messy CSVs, handled** — `--skip N` drops junk preamble rows; the shell even auto-detects and skips them for you.
 - **Readable recipes** (`.dq` files) that chain steps into one streaming pass, with `${VAR}` templating for scheduled jobs.
 - **Read and write the cloud directly** — `s3://`, `gs://`, `https://` — nothing to download first.
@@ -104,6 +105,9 @@ kenze split    sales.parquet --by city -o by_city/    # one file per value
 kenze partition sales.parquet --by year -o lake/      # hive year=2026/ folders
 kenze convert  sales.parquet -o report.xlsx          # write a real Excel workbook
 kenze keep     messy.csv --cols id,amount --skip 3 -o clean.csv  # drop junk preamble
+
+kenze report   summary.csv -o report.pdf --set title="Q1 Review"     # styled PDF report
+kenze report   invoices.csv --per-row --format pdf -o docs/          # one PDF per row (batch)
 
 kenze sql  "SELECT *, lag(amount) OVER (ORDER BY ts) FROM 'sales.parquet'" -o out.csv
 kenze history                                         # your recent runs
@@ -191,7 +195,7 @@ tbl = kenze.to_arrow("SELECT city, count(*) FROM 'big.parquet' GROUP BY 1")   # 
 `profile` · `peek` · `stats` · `plot` · `check` · `validate` · `keep` · `drop` · `rename` · `cast` ·
 `fillna` · `mask` · `scale` · `bin` · `encode` · `onehot` · `clip-outliers` · `filter` · `dedup` ·
 `sample` · `head` · `clip` · `convert` · `join` · `diff` · `pivot` · `unpivot` · `split` ·
-`partition` · `traintest` · `sql` · `eject` · `init` · `run` · `recipe` · `history`
+`partition` · `traintest` · `report` · `sql` · `eject` · `init` · `run` · `recipe` · `history`
 
 Run any of these as a one-liner, or run `kenze` and do it all interactively — the
 shell wraps every command above plus session helpers (`open`, `set`, `dryrun`,

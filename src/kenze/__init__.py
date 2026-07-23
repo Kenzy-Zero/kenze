@@ -39,7 +39,7 @@ from .ops import (
     validate,
 )
 
-__version__ = "0.8.5"
+__version__ = "0.9.0"
 
 
 def sift(input, output, con=None, quiet=True, **steps):
