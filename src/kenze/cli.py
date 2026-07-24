@@ -84,15 +84,20 @@ def build_parser():
     common = argparse.ArgumentParser(add_help=False)
     _add_globals(common)
 
+    # allow_abbrev=False is load-bearing, not tidiness. argparse otherwise treats
+    # an unknown long option as an abbreviation, so `--n` (used by peek, sample,
+    # head, filter and dedup) matches BOTH --no-disk-check and --no-history and
+    # the parse dies with "ambiguous option" before the subcommand ever sees it.
+    # Python 3.13 happens to tolerate it; 3.9 and 3.11 do not.
     p = argparse.ArgumentParser(
-        prog="kenze", parents=[common],
+        prog="kenze", parents=[common], allow_abbrev=False,
         description="kenze - big-file data prep that never runs out of memory (DuckDB-powered).",
     )
     p.add_argument("--version", action="version", version=f"kenze {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def cmd(name, **kw):
-        return sub.add_parser(name, parents=[common], **kw)
+        return sub.add_parser(name, parents=[common], allow_abbrev=False, **kw)
 
     # inspect
     cmd("profile", help="schema + row count, fast (no full load)").add_argument("input")

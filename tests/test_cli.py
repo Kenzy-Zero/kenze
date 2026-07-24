@@ -49,6 +49,28 @@ def test_dedup_n_limits_the_result(people, tmp_path, sql):
     assert sql(f"SELECT count(*) FROM '{out}'")[0][0] == 4
 
 
+def test_n_is_never_an_ambiguous_abbreviation(people, tmp_path):
+    """`--n` must not be read as an abbreviation of --no-disk-check/--no-history.
+
+    argparse abbreviates unknown long options, so without allow_abbrev=False the
+    parse dies with "ambiguous option: --n" before the subcommand sees it. Python
+    3.13 tolerates it, 3.9 and 3.11 do not - so only CI caught this. Every command
+    that takes --n is checked here.
+    """
+    cases = [
+        ("peek", ["peek", people, "--n", "5"]),
+        ("sample", ["sample", people, "--n", "5", "-o", fs(tmp_path / "s.csv"), "-q"]),
+        ("head", ["head", people, "--n", "5", "-o", fs(tmp_path / "h.csv"), "-q"]),
+        ("filter", ["filter", people, "--where", "amount > 100", "--n", "2",
+                    "-o", fs(tmp_path / "f.csv"), "-q"]),
+        ("dedup", ["dedup", people, "--n", "5", "-o", fs(tmp_path / "d.csv"), "-q"]),
+    ]
+    for name, argv in cases:
+        r = kenze_cli(*argv)
+        assert "ambiguous" not in r.stderr, f"{name}: {r.stderr.strip()[-120:]}"
+        assert r.returncode == 0, f"{name} exited {r.returncode}: {r.stderr.strip()[-160:]}"
+
+
 def test_validate_exit_code(people, tmp_path):
     """validate returns exit 1 when the schema doesn't match (cron-safe)."""
     schema = tmp_path / "schema.json"

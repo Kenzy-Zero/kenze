@@ -4,6 +4,21 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.4] - 2026-07-25
+
+### Fixed
+- **`--n` no longer fails with "ambiguous option" on Python 3.9 and 3.11.**
+  argparse treats an unrecognised long option as an abbreviation, so `--n`
+  matched both `--no-disk-check` and `--no-history` and the parse failed before
+  the subcommand ever saw the flag. Python 3.13 tolerated it, which is why it
+  was not caught locally.
+  - This affected **`peek --n`, `sample --n` and `head --n` in every previous
+    release**, not only the `filter --n` and `dedup --n` added in 0.9.3.
+  - Fixed by disabling argparse's option abbreviation (`allow_abbrev=False`) on
+    the main parser and every subcommand. Long options must now be written in
+    full, which was already true of every documented example.
+  - A regression test now runs all five `--n` commands through the real CLI.
+
 ## [0.9.3] - 2026-07-25
 
 ### Added
