@@ -29,7 +29,24 @@ def test_filter_writes_output(people, tmp_path, sql):
     out = fs(tmp_path / "cli.csv")
     r = kenze_cli("filter", people, "--where", "amount > 100", "-o", out, "-q")
     assert r.returncode == 0
-    assert sql(f"SELECT count(*) FROM '{out}'")[0][0] > 0
+    assert sql(f"SELECT count(*) FROM '{out}'")[0][0] == 9  # 9 of 12 rows match
+
+
+def test_filter_n_limits_the_result(people, tmp_path, sql):
+    """--n caps the output so you can eyeball a filter before writing it all."""
+    out = fs(tmp_path / "peek.csv")
+    r = kenze_cli("filter", people, "--where", "amount > 100", "--n", "3", "-o", out, "-q")
+    assert r.returncode == 0
+    assert sql(f"SELECT count(*) FROM '{out}'")[0][0] == 3
+    # the filter still applies - a limit must never leak non-matching rows
+    assert sql(f"SELECT count(*) FROM '{out}' WHERE amount <= 100")[0][0] == 0
+
+
+def test_dedup_n_limits_the_result(people, tmp_path, sql):
+    out = fs(tmp_path / "dpeek.csv")
+    r = kenze_cli("dedup", people, "--n", "4", "-o", out, "-q")
+    assert r.returncode == 0
+    assert sql(f"SELECT count(*) FROM '{out}'")[0][0] == 4
 
 
 def test_validate_exit_code(people, tmp_path):

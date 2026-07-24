@@ -167,9 +167,12 @@ def build_parser():
     sp = cmd("filter", help="keep rows matching a SQL condition")
     _io(sp)
     sp.add_argument("--where", required=True)
+    sp.add_argument("--n", type=int,
+                    help="keep only the first N matching rows (quick check before writing)")
     sp = cmd("dedup", help="drop duplicate rows (default: whole-row)")
     _io(sp)
     sp.add_argument("--on", default="all", help="key column(s), comma-separated")
+    sp.add_argument("--n", type=int, help="keep only the first N rows of the result")
     sp = cmd("sample", help="random N rows")
     _io(sp)
     sp.add_argument("--n", type=int, required=True)
@@ -440,6 +443,10 @@ def _transform(a):
     elif a.cmd in _TRANSFORMS:
         attr, key = _TRANSFORMS[a.cmd]
         spec[key] = getattr(a, attr)
+        # --n on a row op = "show me the first N of the result" (peek before writing).
+        # Only where the flag isn't already the operation itself (sample/head).
+        if a.cmd in ("filter", "dedup") and getattr(a, "n", None):
+            spec["head"] = a.n
     elif a.cmd == "convert":  # no transforms, just re-COPY to the new format
         for attr, key in (("lat", "geo_lat"), ("lon", "geo_lon"), ("geom", "geo_wkt")):
             if getattr(a, attr, None):

@@ -4,6 +4,23 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.3] - 2026-07-25
+
+### Added
+- **`--n` on `filter` and `dedup`** - cap the result so you can check an operation
+  before writing the whole thing. Requested by a user who wanted to confirm a
+  filter was right without piping the result through a full `kenze sql` query
+  with a `LIMIT` clause.
+  - `kenze filter sales.parquet --where "amount > 100" --n 20 -o -` prints the
+    first 20 matching rows to the terminal.
+  - `kenze dedup users.csv --on id --n 20 -o -` does the same for deduplication.
+  - The condition is still evaluated against the entire file; `--n` only limits
+    how many of the matching rows come back, so a limit can never return a row
+    that does not match.
+  - `--n` matches the flag already used by `sample` and `head`.
+  - The interactive shell already supported this by stacking `filter` then `head`,
+    and continues to show a live preview after every step.
+
 ## [0.9.2] - 2026-07-23
 
 ### Added

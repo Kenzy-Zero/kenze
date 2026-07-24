@@ -2,7 +2,7 @@
 
 Big-file data preparation that never runs out of memory. No SQL required.
 
-Version 0.9.2
+Version 0.9.3
 
 ---
 
@@ -466,6 +466,21 @@ syntax.
 kenze filter sales.parquet --where "amount > 100 AND city = 'London'" -o big.csv
 ```
 
+Add `--n` to cap the result, which is useful for checking that a condition does
+what you expect before writing the whole thing. Combined with `-o -` it prints a
+short preview to the terminal.
+
+```
+kenze filter sales.parquet --where "amount > 100" --n 20 -o -
+```
+
+The condition is still applied to the entire file; `--n` only limits how many of
+the matching rows are returned.
+
+Options:
+- `--where "condition"` — the condition to match (required).
+- `--n N` — keep only the first N matching rows.
+
 #### dedup
 
 Remove duplicate rows. By default the entire row must match to be considered a
@@ -475,10 +490,12 @@ for each combination of key values is kept.
 ```
 kenze dedup users.csv --on id -o unique.parquet
 kenze dedup users.csv --on all -o unique.parquet
+kenze dedup users.csv --on id --n 20 -o -
 ```
 
 Options:
 - `--on cols` — key column(s), comma-separated; or `all` for whole-row (default).
+- `--n N` — keep only the first N rows of the result.
 
 #### sample
 
@@ -1078,7 +1095,7 @@ kenze follows semantic versioning. The core stays small and grows one release at
 a time. Each release is built, checked, published to PyPI, and verified with a
 clean-environment install before being considered done.
 
-The current release is 0.9.2.
+The current release is 0.9.3.
 
 ---
 
