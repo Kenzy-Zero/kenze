@@ -47,7 +47,7 @@ report = ["jinja2>=3.0"]
 # everything optional: the dataframe bridges + report
 all = ["polars>=0.20", "pyarrow>=14", "pandas>=1.5", "jinja2>=3.0"]
 # contributor toolchain: `pip install -e ".[dev]"` then `pytest`
-dev = ["pytest>=7", "ruff", "build", "jinja2>=3.0"]
+dev = ["pytest>=7", "ruff==0.15.*", "build", "jinja2>=3.0"]
 
 [project.urls]
 Homepage = "https://github.com/Kenzy-Zero/kenze"
@@ -58,6 +58,19 @@ Issues = "https://github.com/Kenzy-Zero/kenze/issues"
 
 [project.scripts]
 kenze = "kenze.cli:main"
+
+[tool.ruff]
+# Stated explicitly so every machine lints identically. Without this, ruff uses
+# whatever its current default rule set happens to be, and a new ruff release
+# turns CI red on untouched code (which is exactly what 0.16.0 did on 2026-07-25).
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# The rules kenze has always effectively been linted against: pyflakes plus the
+# pycodestyle errors that catch real mistakes. Additional rule families can be
+# adopted deliberately, one at a time, with the fixes in the same commit.
+select = ["E4", "E7", "E9", "F"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
