@@ -1468,8 +1468,51 @@ def make_completer(st):
     return KenzeCompleter()
 
 
+def _wordish(c):
+    """A character a quote should NOT be auto-paired against (letters, digits,
+    underscore). Note `c` can be "" at the start/end of the line - and `"" in "_"`
+    is True, so membership tests here have to be guarded."""
+    return bool(c) and (c.isalnum() or c == "_")
+
+
+def _quote_action(text, cursor, ch):
+    """Decide what a typed quote should do, so `filter city = '` closes itself.
+
+    Returns "skip"  -> the closing quote is already there, step over it
+            "pair"  -> insert both quotes and sit between them
+            "plain" -> insert one quote, nothing clever
+
+    The rules are the ones editors use, in this order:
+      1. sitting on the same quote -> step over it (so typing the closing quote
+         of `'London'` never leaves you with `'London''`)
+      2. right after a word character -> plain, so an apostrophe inside a word
+         (`don't`, `O'Brien`) is never doubled
+      3. right before a word character -> plain, so typing a quote in front of
+         existing text doesn't wrap it
+      4. otherwise -> pair
+    """
+    if ch not in "\"'":
+        return "plain"
+    after = text[cursor] if cursor < len(text) else ""
+    before = text[cursor - 1] if cursor > 0 else ""
+    if after == ch:
+        return "skip"
+    if _wordish(before) or _wordish(after):
+        return "plain"
+    return "pair"
+
+
+def _closes_empty_pair(text, cursor):
+    """True when the cursor sits inside an empty quote pair (`'|'`), so one
+    backspace removes both halves instead of stranding the auto-added quote."""
+    if cursor <= 0 or cursor >= len(text):
+        return False
+    return text[cursor - 1] == text[cursor] and text[cursor] in "\"'"
+
+
 def _make_keys():
-    """TAB = autofill the top suggestion (not navigate); shift-TAB steps back."""
+    """TAB = autofill the top suggestion (not navigate); shift-TAB steps back.
+    Quotes auto-close so a text filter can be typed straight through."""
     from prompt_toolkit.key_binding import KeyBindings
 
     kb = KeyBindings()
@@ -1490,6 +1533,39 @@ def _make_keys():
             b.complete_previous()
         else:
             b.start_completion(select_last=True)
+
+    # Quote handling only ever runs on a plain cursor with no selection; every
+    # other case falls through to prompt_toolkit's own bindings untouched.
+    from prompt_toolkit.filters import Condition, has_selection
+
+    def _quote_key(ch):
+        def handler(event):
+            b = event.current_buffer
+            action = _quote_action(b.text, b.cursor_position, ch)
+            if action == "skip":
+                b.cursor_position += 1
+            elif action == "pair":
+                b.insert_text(ch + ch)
+                b.cursor_position -= 1
+            else:
+                b.insert_text(ch)
+        return handler
+
+    kb.add("'", filter=~has_selection)(_quote_key("'"))
+    kb.add('"', filter=~has_selection)(_quote_key('"'))
+
+    @Condition
+    def _in_empty_pair():
+        from prompt_toolkit.application import get_app
+        b = get_app().current_buffer
+        return _closes_empty_pair(b.text, b.cursor_position)
+
+    @kb.add("backspace", filter=~has_selection & _in_empty_pair)
+    def _(event):  # noqa: F811
+        # deleting the opening quote of an auto-added pair takes the closing
+        # one with it, so you're never left holding a stray quote
+        event.current_buffer.delete()
+        event.current_buffer.delete_before_cursor()
 
     return kb
 

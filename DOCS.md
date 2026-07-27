@@ -2,7 +2,7 @@
 
 Big-file data preparation that never runs out of memory. No SQL required.
 
-Version 0.9.4
+Version 0.9.5
 
 ---
 
@@ -61,8 +61,9 @@ kenze can be used two ways, over the same engine:
 
 - **Interactively.** Run `kenze` with no arguments to enter a live shell: load a
   file once, stack steps that preview as you go, then run or save the result.
-  Every command below is available in the shell, along with a `/` command menu and
-  column autocomplete. The shell is documented in full in `SHELL.md`.
+  Every command below is available in the shell, along with a `/` command menu,
+  column autocomplete, and self-closing quotes (typing `'` gives you the pair with
+  the cursor in the middle). The shell is documented in full in `SHELL.md`.
 - **As a one-line CLI.** `kenze <command> <input> -o <output>` — ideal for scripts,
   cron, and pipelines. This document is the reference for that form.
 
@@ -1095,7 +1096,7 @@ kenze follows semantic versioning. The core stays small and grows one release at
 a time. Each release is built, checked, published to PyPI, and verified with a
 clean-environment install before being considered done.
 
-The current release is 0.9.4.
+The current release is 0.9.5.
 
 ---
 

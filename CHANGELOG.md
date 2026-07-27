@@ -4,6 +4,28 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.5] - 2026-07-27
+
+### Added
+- **Quotes close themselves in the interactive shell.** Typing `'` inserts the
+  pair and leaves the cursor between them, so a text filter can be typed
+  straight through: `filter city = '` becomes `filter city = '|'`. Requested by
+  a user who kept having to add the closing quote by hand.
+  - Typing the closing quote **steps over** the one already there, so
+    `filter city = 'London'` never ends up as `filter city = 'London''`.
+  - Backspacing the opening quote of an auto-added pair removes both, so you are
+    never left holding a stray quote.
+  - `"` behaves the same way, which is how paths with spaces get typed
+    (`load "Feb 10.csv"`).
+  - An apostrophe **inside a word** is left alone (`don't` stays `don't`), as is
+    a quote typed in front of existing text.
+  - Only applies to the rich shell, and only with no active selection - every
+    other case falls through to prompt_toolkit's own key handling unchanged.
+
+### Internal
+- `history --n` added to the `--n` abbreviation regression test, which had
+  covered the other five commands only.
+
 ## [0.9.4] - 2026-07-25
 
 ### Fixed

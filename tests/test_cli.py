@@ -64,6 +64,7 @@ def test_n_is_never_an_ambiguous_abbreviation(people, tmp_path):
         ("filter", ["filter", people, "--where", "amount > 100", "--n", "2",
                     "-o", fs(tmp_path / "f.csv"), "-q"]),
         ("dedup", ["dedup", people, "--n", "5", "-o", fs(tmp_path / "d.csv"), "-q"]),
+        ("history", ["history", "--n", "5"]),
     ]
     for name, argv in cases:
         r = kenze_cli(*argv)

@@ -218,6 +218,16 @@ fill in what it asks for, and press Enter.
 - TAB also completes options: `run`/`convert` keywords, `set` settings, and the
   type/method after a colon (`cast id:VARCHAR`, `scale x:zscore`).
 - **Up / Down** browse an open menu; **Shift-TAB** steps back; **Esc** dismisses it.
+- **Quotes close themselves.** Typing `'` gives you `''` with the cursor in the
+  middle, so a text filter types straight through:
+
+      kenze > filter city = '        <- you type one quote
+      kenze > filter city = '|'      <- you get the pair, cursor in the middle
+
+  Typing the closing quote steps over the one already there (so you never get
+  `'London''`), and backspacing the opening quote removes both. `"` works the
+  same way, which is how paths with spaces get typed: `load "Feb 10.csv"`.
+  An apostrophe inside a word (`don't`) is left alone.
 - **Ctrl-C** clears the current line; **Ctrl-D** (or `exit`) leaves.
 
 ---
