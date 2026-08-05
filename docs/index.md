@@ -14,7 +14,7 @@ library. Start wherever fits what you're doing.
 |---|---|
 | **[Python API reference](python-api.md)** | using kenze as a **library** (`import kenze`) — every public function with its exact signature, arguments, return value, and an example. |
 | **[CLI reference](../DOCS.md)** | the full command-line reference: every command, every flag, the memory model, cloud storage, recipes, and the roadmap. |
-| **[Interactive shell](../SHELL.md)** | the `kenze` live session — the `/` command menu, schema-aware autocomplete, building a pipeline step by step, and the guided toolbar. |
+| **[Interactive shell](../SHELL.md)** | the `kenze` live session — the `/` command menu, ghost text and value autocomplete (it completes the real values in your file, not just the column names), building a pipeline step by step, and the guided toolbar. |
 | **[Reports](report.md)** | `kenze report` — turn a data file into a styled **PDF / HTML** report (built-in themes, scaffolding, custom templates, one-per-row batch). |
 
 ## Reference

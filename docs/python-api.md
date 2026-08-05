@@ -27,7 +27,7 @@ calls; omit it and kenze opens and closes a fresh one for you.
 
 - [The whole-file entry point](#the-whole-file-entry-point) — `sift`, `run`, `sql`
 - [The engine](#the-engine) — `connect`
-- [Inspecting data](#inspecting-data) — `profile`, `peek`, `stats`, `count`, `check`, `validate`, `plot`, `history`
+- [Inspecting data](#inspecting-data) — `profile`, `peek`, `stats`, `count`, `check`, `validate`, `scaffold_schema`, `plot`, `history`
 - [Transform and write](#transform-and-write) — `run_spec`, `build_query`, `run_sql`
 - [Combine, reshape, split](#combine-reshape-split) — `join`, `diff`, `pivot`, `unpivot`, `split`, `partition`, `traintest`
 - [Hand off to a dataframe](#hand-off-to-a-dataframe) — `to_polars`, `to_arrow`, `to_df`
@@ -115,21 +115,30 @@ con.close()
 
 These print a formatted result and/or return a value; none require an output file.
 
-### `profile(path, con=None, fmt=None, skip=0) -> int`
+They all accept the same three arguments for a messy CSV, and each does a
+different job:
+
+| argument | what it does |
+|---|---|
+| `skip=N` | drop N preamble rows before the header — comment banners and other junk at the top of an export. |
+| `skip_bad=True` | ignore rows the parser rejects. The row is **dropped**, not repaired. |
+| `strict=False` | read a file that breaks the CSV standard outright — mixed line endings, a stray quote in an unquoted field, which is ordinary Spark output. Distinct from `skip_bad`: this **accepts** a non-conforming row and discards any fields past the header, so it is the flag for a file that will not open at all. |
+
+### `profile(path, con=None, fmt=None, skip=0, skip_bad=False, strict=True) -> int`
 
 Print the schema and exact row count. For Parquet this reads only metadata, so
 it's instant on huge files. Returns the row count. `fmt` reads a lakehouse table
 (`"delta"` / `"iceberg"`); `skip` drops N preamble rows before a CSV header.
 
-### `peek(path, n=20, con=None, fmt=None, skip=0)`
+### `peek(path, n=20, con=None, fmt=None, skip=0, skip_bad=False, strict=True)`
 
 Print the first `n` rows with types and null counts.
 
-### `stats(path, con=None, fmt=None, skip=0)`
+### `stats(path, con=None, fmt=None, skip=0, skip_bad=False, strict=True)`
 
 Print a per-column summary: min / max / null% / approx-unique.
 
-### `count(path, by, out=None, distinct=None, top=None, con=None, quiet=False, fmt=None, skip=0, disk_check=True)`
+### `count(path, by, out=None, distinct=None, top=None, con=None, quiet=False, fmt=None, skip=0, disk_check=True, skip_bad=False, strict=True)`
 
 Value-counts / GROUP BY count — how many rows per value(s) of a column, biggest
 first. Prints if `out` is omitted, writes a file if `out` is given. Returns the
@@ -149,16 +158,32 @@ kenze.count("sales.csv", "city", distinct="user_id")      # unique users per cit
 kenze.count("sales.csv", ["city", "category"])            # group by two columns
 ```
 
-### `check(path, con=None) -> int`
+### `check(path, con=None, skip=0) -> int`
 
 Pre-flight integrity scan: is the file readable, how many rows are malformed.
 Returns a non-zero code on problems.
 
-### `validate(path, schema_path, con=None) -> int`
+### `validate(path, schema_path, con=None, skip=0, skip_bad=False, strict=True) -> int`
 
-Check a file against a target schema JSON. Returns non-zero on a mismatch.
+Check a file against a target schema JSON. Returns the number of problems, so
+`0` means the file conforms. Reports every column whose type does not match,
+every required column that is absent, and any nulls in columns listed under
+`not_null`.
 
-### `plot(path, column, by=None, agg=None, bins=20, top=20, width=48, con=None, fmt=None)`
+### `scaffold_schema(path, out, con=None, skip=0, skip_bad=False, strict=True) -> str`
+
+Write the schema JSON that describes `path` as it is today, so you do not have
+to write one by hand. Every column is recorded with its real type, and every
+column with **no nulls right now** is listed under `not_null` — a measured fact
+about this file, meant as a starting point to edit rather than a claim about
+what the data means. Returns the path written.
+
+```python
+kenze.scaffold_schema("sales.csv", "schema.json")   # write the contract
+kenze.validate("next_month.csv", "schema.json")     # 0 = still conforms
+```
+
+### `plot(path, column, by=None, agg=None, bins=20, top=20, width=48, con=None, fmt=None, skip=0, skip_bad=False, strict=True)`
 
 Print an ASCII chart of a column: a value-counts / bar chart (text column), a
 histogram (numeric), or an aggregate per category with `by=`.
