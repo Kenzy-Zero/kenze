@@ -148,3 +148,22 @@ def test_typing_a_quoted_filter_end_to_end():
     assert typed(list("sql select 'don") + ["'"])[0] == "sql select 'don'"
     # a line with no quotes is completely unaffected
     assert typed(list("filter amount > 100")) == ("filter amount > 100", 19)
+
+
+# --- documentation that must not drift ------------------------------------------
+
+def test_contributing_lists_every_test_module():
+    """CONTRIBUTING.md tells a contributor where each kind of test lives, so a
+    module missing from it is a module nobody knows to update.
+
+    It had drifted to 7 of 15 - all the shell, report, geojson and CSV work was
+    invisible - which is the kind of rot that only shows up when somebody reads
+    the file from the outside. This turns "remember to update the docs" into a
+    failing test.
+    """
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    modules = {p.name for p in (root / "tests").glob("test_*.py")}
+    listed = (root / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    missing = sorted(m for m in modules if m not in listed)
+    assert not missing, f"not mentioned in CONTRIBUTING.md: {missing}"

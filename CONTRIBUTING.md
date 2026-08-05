@@ -41,6 +41,16 @@ regression:
 - `test_ml.py` — the ML-prep transforms (scale, encode, onehot, traintest, …)
 - `test_engine.py` — the never-OOM connection config
 - `test_cli.py` — the installed `kenze` command, end-to-end
+- `test_count.py` — `count` (value-counts / group-by)
+- `test_sort.py` — `sort`
+- `test_geojson.py` — GeoJSON read and write
+- `test_report.py` — `report` (PDF / HTML output)
+- `test_shell.py` — the interactive shell: command parity, key bindings, settings
+- `test_value_complete.py` — ghost text and value autocomplete, including tests
+  that drive a real `PromptSession` and press actual keys
+- `test_csv_strict.py` — CSVs that break the standard, and the boundary between
+  dropping a bad row and relaxing the parser
+- `test_validate.py` — the schema gate and `--scaffold`
 
 If you add or change a command, add or update its test. Prefer checking behaviour
 against DuckDB reading the output (see the helpers in `tests/conftest.py`) rather
