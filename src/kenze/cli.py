@@ -9,7 +9,7 @@ import sys
 import duckdb
 
 from . import __version__
-from .engine import connect
+from .engine import connect, hint_for
 from .ops import (
     check,
     count,
@@ -41,7 +41,7 @@ _GLOBAL_DEFAULTS = {
     "memory_limit": None, "temp_dir": None, "no_disk_check": False,
     "skip_bad_lines": False, "log": None, "quiet": False,
     "dry_run": False, "errors": None, "append": False, "source_format": None,
-    "threads": None, "skip": 0, "no_history": False,
+    "threads": None, "skip": 0, "no_history": False, "no_strict_csv": False,
 }
 
 
@@ -57,6 +57,9 @@ def _add_globals(parser):
                    help="skip the pre-flight free-space check")
     g.add_argument("--skip-bad-lines", action="store_true", default=s,
                    help="ignore malformed rows in CSV input")
+    g.add_argument("--no-strict-csv", action="store_true", default=s,
+                   help="read a CSV that breaks the standard (mixed line endings, a stray "
+                        "quote) - rows that don't fit the header lose the overflow")
     g.add_argument("--skip", type=int, metavar="N", default=s,
                    help="skip N preamble rows before the CSV header (messy exports)")
     g.add_argument("--no-history", action="store_true", default=s,
@@ -293,6 +296,8 @@ def _con(a):
 
 def _spec_globals(a, spec):
     spec.setdefault("skip_bad_lines", a.skip_bad_lines)
+    if not _strict(a):
+        spec["strict_csv"] = False
     if a.errors:
         spec["errors"] = a.errors
     if a.append:
@@ -316,25 +321,43 @@ def _run(a, spec):
         con.close()
 
 
+def _lenient(a) -> bool:
+    """Did the user ask us to be forgiving about malformed ROWS?
+
+    --errors counts as yes for the read-only commands too: they write nothing,
+    so there is no quarantine file to fill, but the intent ("get through this
+    file") is identical and refusing to inspect it would be perverse.
+    """
+    return bool(getattr(a, "skip_bad_lines", False) or getattr(a, "errors", None))
+
+
+def _strict(a) -> bool:
+    """...and a separate question from whether the FILE may break the standard."""
+    return not getattr(a, "no_strict_csv", False)
+
+
 def _inspect(a):
     """Read-only commands. Returns True if it handled the command."""
+    lenient, strict = _lenient(a), _strict(a)
     if a.cmd == "recipe":
         print(REFERENCE)
     elif a.cmd == "profile":
-        profile(a.input, fmt=a.source_format, skip=a.skip or 0)
+        profile(a.input, fmt=a.source_format, skip=a.skip or 0, skip_bad=lenient, strict=strict)
     elif a.cmd == "peek":
-        peek(a.input, n=a.n, fmt=a.source_format, skip=a.skip or 0)
+        peek(a.input, n=a.n, fmt=a.source_format, skip=a.skip or 0, skip_bad=lenient,
+             strict=strict)
     elif a.cmd == "stats":
-        stats(a.input, fmt=a.source_format, skip=a.skip or 0)
+        stats(a.input, fmt=a.source_format, skip=a.skip or 0, skip_bad=lenient, strict=strict)
     elif a.cmd == "plot":
         plot(a.input, a.column, by=a.by, agg=a.agg, bins=a.bins, top=a.top,
-             width=a.width, fmt=a.source_format)
+             width=a.width, fmt=a.source_format, skip=a.skip or 0, skip_bad=lenient,
+             strict=strict)
     elif a.cmd == "check":
-        check(a.input)
+        check(a.input, skip=a.skip or 0)
     elif a.cmd == "history":
         history(n=a.n)
     elif a.cmd == "validate":
-        if validate(a.input, a.schema):
+        if validate(a.input, a.schema, skip=a.skip or 0, skip_bad=lenient, strict=strict):
             sys.exit(1)
     elif a.cmd == "init":
         init(a.path, input_path=a.init_input)
@@ -381,7 +404,8 @@ def _combine(a):
         run_sql(a.query, out=a.output, con=_con(a), quiet=a.quiet, disk_check=not a.no_disk_check)
     elif a.cmd == "count":
         count(a.input, a.by, out=a.output, distinct=a.distinct, top=a.top, con=_con(a),
-              quiet=a.quiet, fmt=a.source_format, skip=a.skip or 0, disk_check=not a.no_disk_check)
+              quiet=a.quiet, fmt=a.source_format, skip=a.skip or 0,
+              disk_check=not a.no_disk_check, skip_bad=_lenient(a), strict=_strict(a))
     elif a.cmd == "eject":
         with open(a.recipe, "r", encoding="utf-8") as f:
             spec = parse_recipe(f.read())
@@ -485,6 +509,7 @@ def main(argv=None):
     try:
         _dispatch(a)
     except (ValueError, FileNotFoundError, OSError, duckdb.Error) as e:
-        sys.exit(f"Error: {e}")
+        hint = hint_for(e)
+        sys.exit(f"Error: {e}" + (f"\n  kenze: {hint}" if hint else ""))
     except KeyboardInterrupt:
         sys.exit("\ncancelled (no partial output was written)")

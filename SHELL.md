@@ -141,8 +141,10 @@ aborts and no output file is produced. Saved into the recipe by `save`.
 
 `set` mirrors the CLI's power flags for the session: `set memory <GB>` (or `auto`)
 pins the RAM budget, `set threads <N>` caps cores, `set skip-bad on` ignores
-malformed CSV rows, `set temp <dir>` moves disk-spill, `set disk-check off` skips
-the pre-flight free-space check. To read a lakehouse table, `load <path> as delta`
+malformed CSV rows, `set strict-csv off` opens a CSV that breaks the standard
+outright (mixed line endings, a stray quote — reload the file after changing it),
+`set temp <dir>` moves disk-spill, `set disk-check off` skips the pre-flight
+free-space check. To read a lakehouse table, `load <path> as delta`
 (or `as iceberg`).
 
 ---
@@ -262,7 +264,7 @@ or say it explicitly with `eject python out.py`).
 The shell covers the whole CLI: single-file cleaning, combine/reshape/split,
 integrity checks, ascii `plot` charts, Excel (`.xlsx`) read/write, messy-CSV `skip`,
 run `history`, data-quality guards, opening and running saved recipes, and every
-power setting (`set` for memory / threads / skip-bad / temp / disk-check, `run`
+power setting (`set` for memory / threads / skip-bad / strict-csv / temp / disk-check, `run`
 options for append / errors / log, `load ... as delta|iceberg`). The only thing that
 lives outside the shell is the Python API (`import kenze; kenze.to_polars(...)`),
 which is a library, not a shell command.

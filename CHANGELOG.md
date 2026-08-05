@@ -4,6 +4,51 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.6] - 2026-08-05
+
+Found by using kenze for real work: a plain Spark-written CSV could not be
+opened by any documented route.
+
+### Added
+- **`--no-strict-csv`** — read a CSV that breaks the CSV standard: mixed `\r\n`
+  and `\n` line endings, or a stray quote in an unquoted field. Files written by
+  Spark (`part-00000-<uuid>-c000.csv`) do this routinely, and until now kenze
+  could not open them **at all** — the parser fails in its state machine before
+  there is any row to skip, so neither `--skip-bad-lines` nor `--errors` could
+  rescue the file. Both failed byte-identically to the plain call, which meant a
+  user who read `--help` and tried the obvious flags reached a dead end.
+  - It is a **separate flag on purpose.** `--skip-bad-lines` *drops* a row it
+    cannot parse and `--errors` hands it back to you; relaxing the standard
+    instead *accepts* a non-conforming row and silently discards any fields past
+    the header — `12,tail,EXTRA` arrives as `12,tail` with nothing reported
+    anywhere. Folding that into the existing flags would have made a broken file
+    look clean, so the two stay apart and the trade-off stays visible.
+  - Available in the shell as `set strict-csv off`, and from Python as
+    `strict=False` on `profile` / `peek` / `stats` / `plot` / `count` /
+    `validate` / `sift`.
+
+### Fixed
+- **The global CSV flags now reach the read-only commands.** `profile`, `peek`,
+  `stats`, `plot`, `count` and `validate` never accepted `--skip-bad-lines` or
+  `--errors` — the flags parsed fine and were then dropped before the command
+  ran, so a dirty file could be *transformed* but not *looked at*. These are the
+  commands you reach for first on a file that won't open, which made the gap
+  worse than it sounds.
+- **`kenze check` no longer dies on the file it is diagnosing.** Its
+  readable-row probe used `ignore_errors` alone, so on a non-RFC-4180 file the
+  integrity scan crashed instead of reporting. It now falls back to the relaxed
+  parser and says which kind of damage it found — malformed rows, or a file that
+  breaks the standard — naming the flag that gets past each.
+- **CSV errors now name a flag you can actually type.** DuckDB reports the fix
+  in its own terms (`strict_mode=false`), which is not something a kenze user
+  can pass. The error is now followed by kenze's own line pointing at
+  `--no-strict-csv`, or at `set strict-csv off` inside the shell.
+
+### Internal
+- New regression module `tests/test_csv_strict.py` (17 tests). It pins both
+  halves of the boundary: that the standard can be relaxed on request, and that
+  `--skip-bad-lines` never relaxes it for free.
+
 ## [0.9.5] - 2026-07-27
 
 ### Added

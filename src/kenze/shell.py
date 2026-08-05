@@ -298,6 +298,7 @@ class ShellState:
         self.mem_gb = None       # None = auto-size to free RAM
         self.threads = None      # None = all cores
         self.skip_bad = False    # ignore malformed CSV rows on read
+        self.strict_csv = True   # off = read a CSV that breaks the standard
         self.skip = 0            # preamble rows to skip on the loaded csv
         self.source_format = None  # 'delta' | 'iceberg' for the loaded file
         self.temp_dir = None     # disk-spill location (None = system temp)
@@ -324,6 +325,8 @@ class ShellState:
             spec["input"] = self.input
         if self.skip_bad:
             spec["skip_bad_lines"] = True
+        if not self.strict_csv:
+            spec["strict_csv"] = False
         if self.skip:
             spec["skip"] = self.skip
         if self.source_format:
@@ -471,6 +474,7 @@ def h_load(st, arg):
 
     def _read(skip_n):
         probe = {"input": path, "skip_bad_lines": st.skip_bad,
+                 "strict_csv": st.strict_csv,
                  "source_format": fmt, "skip": skip_n}
         return columns(st.con, f"({build_query(st.con, probe)})")
 
@@ -492,8 +496,12 @@ def h_load(st, arg):
             else:
                 raise
     except Exception as e:
+        from .engine import hint_for
         shown = os.path.basename(path.rstrip("/\\")) or path
         _say(f"  Error: couldn't load {shown}  ({e})", "err")
+        hint = hint_for(e, shell=True)
+        if hint:
+            _say(f"  kenze: {hint}", "warn")
         return
     st.input, st.cols, st.steps = path, cols, []
     st.source_format, st.skip = fmt, skip
@@ -1226,10 +1234,11 @@ def h_set(st, arg):
         _say_parts([("accent2", "    memory      "), ("", mem)])
         _say_parts([("accent2", "    threads     "), ("", thr)])
         _say_parts([("accent2", "    skip-bad    "), ("", "on" if st.skip_bad else "off")])
+        _say_parts([("accent2", "    strict-csv  "), ("", "on" if st.strict_csv else "off")])
         _say_parts([("accent2", "    temp        "), ("", st.temp_dir or "auto (system temp)")])
         _say_parts([("accent2", "    disk-check  "), ("", "on" if st.disk_check else "off")])
         _say("  change with:  set memory 8 | set threads 4 | set skip-bad on"
-             " | set temp D:\\spill | set disk-check off", "dim")
+             " | set strict-csv off | set temp D:\\spill | set disk-check off", "dim")
         return
     key, val = a[0].lower(), (a[1] if len(a) > 1 else "")
     try:
@@ -1244,6 +1253,11 @@ def h_set(st, arg):
         elif key in ("skip-bad", "skipbad", "skip_bad"):
             st.skip_bad = val.lower() in ("on", "true", "1", "yes")
             _say(f"  skip-bad -> {'on' if st.skip_bad else 'off'}", "ok")
+        elif key in ("strict-csv", "strictcsv", "strict_csv", "strict"):
+            st.strict_csv = val.lower() in ("on", "true", "1", "yes")
+            _say(f"  strict-csv -> {'on' if st.strict_csv else 'off'}", "ok")
+            if not st.strict_csv and st.input:
+                _say("  reload the file for this to take effect", "dim")
         elif key in ("temp", "temp-dir", "tempdir"):
             st.temp_dir = val or None
             st.reconnect()
@@ -1252,7 +1266,7 @@ def h_set(st, arg):
             st.disk_check = val.lower() in ("on", "true", "1", "yes")
             _say(f"  disk-check -> {'on' if st.disk_check else 'off'}", "ok")
         else:
-            _say("  set what? memory | threads | skip-bad | temp | disk-check", "warn")
+            _say("  set what? memory | threads | skip-bad | strict-csv | temp | disk-check", "warn")
     except ValueError:
         _say(f"  Error: '{val}' is not a valid number", "err")
 
@@ -1319,7 +1333,11 @@ def dispatch(st, line):
     try:
         fn(st, arg)
     except Exception as e:
+        from .engine import hint_for
         _say(f"  Error: {e}", "err")   # friendly, never a traceback
+        hint = hint_for(e, shell=True)
+        if hint:
+            _say(f"  kenze: {hint}", "warn")
     return False
 
 

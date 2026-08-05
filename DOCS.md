@@ -296,7 +296,9 @@ kenze check sales.csv
 ```
 
 If malformed rows are reported, you can process the file anyway with the global
-`--skip-bad-lines` flag (see section 10).
+`--skip-bad-lines` flag (see section 10). If the report says the file is not RFC
+4180 compliant, the damage is at the file level rather than the row level and the
+flag to use is `--no-strict-csv`; `check` names whichever one applies.
 
 #### validate
 
@@ -971,7 +973,8 @@ command name.
 | `--temp-dir DIR` | Use a specific directory for disk-spill. Point this at a drive with plenty of free space when processing very large files. |
 | `--threads N` | Cap the number of CPU threads DuckDB uses (default: all cores). |
 | `--no-disk-check` | Skip the pre-flight free-space check. |
-| `--skip-bad-lines` | Ignore malformed rows in CSV input rather than stopping on them. |
+| `--skip-bad-lines` | Ignore malformed rows in CSV input rather than stopping on them. The row is dropped, not repaired. |
+| `--no-strict-csv` | Read a CSV that breaks the CSV standard outright — mixed line endings, or a stray quote in an unquoted field — which is common in files written by Spark and similar tools. Distinct from `--skip-bad-lines`: that one *drops* a row it cannot parse, this one *accepts* a non-conforming row and discards any fields past the header. Use it when a file will not open at all. |
 | `--skip N` | Skip N preamble rows before the CSV header — comment banners, blank lines and other junk that messy exports put at the top. |
 | `--no-history` | Do not record this run in the local run ledger (`~/.kenze/history.jsonl`). Recording can also be disabled globally with the environment variable `KENZE_NO_HISTORY=1`. |
 | `--errors PATH` | Quarantine malformed CSV rows to a file (with line/column diagnostics) and keep processing the good rows. |
@@ -1076,6 +1079,16 @@ or see section 3 for permanent fixes.
 **A CSV fails to read because of malformed rows.** Run `kenze check <file>` to see
 how many rows are affected, then re-run your command with `--skip-bad-lines` to
 ignore them.
+
+**A CSV fails to read with "the CSV Parser state machine reached an invalid
+state".** The file is not RFC 4180 compliant — most often it mixes `\r\n` and
+`\n` line endings, or carries a stray quote inside an unquoted field. Files
+written by Spark (`part-00000-<uuid>-c000.csv`) do this regularly. `--skip-bad-lines`
+will not help, because the parser fails before there is any row to skip: re-run
+with `--no-strict-csv`. Note the trade-off that flag makes — a row with more
+fields than the header is accepted and the overflow is discarded, rather than
+being dropped or quarantined. Run `kenze check <file>` first if you want to know
+which kind of damage you have.
 
 **A run stops with a free-space error before starting.** This is the pre-flight
 disk check. Free up space, point `--temp-dir` at a drive with more room, or pass

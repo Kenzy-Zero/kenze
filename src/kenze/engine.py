@@ -130,6 +130,41 @@ def load_extension(con, name: str):
             ) from e
 
 
+# ------------------------------------------------------- error translation
+
+# DuckDB's CSV failures for a file that breaks the standard. They all have the
+# same cure and, crucially, ignore_errors is NOT it - the parser dies before
+# there is a row to ignore.
+_STRICT_CSV_MARKERS = (
+    "state machine reached an invalid state",
+    "not rfc 4180",
+    "strict_mode",
+    "error when sniffing file",
+)
+
+
+def is_strict_csv_error(err) -> bool:
+    t = str(err).lower()
+    return any(m in t for m in _STRICT_CSV_MARKERS)
+
+
+def hint_for(err, shell: bool = False) -> str:
+    """kenze's own advice for an error whose fix is a kenze flag, or "".
+
+    DuckDB politely names the DuckDB *parameter* that would fix a broken CSV
+    (strict_mode=false) - which is useless to somebody driving kenze, who has
+    no way to type it. Translate it into the thing they can actually run.
+    """
+    if not is_strict_csv_error(err):
+        return ""
+    what = ("this file doesn't follow the CSV standard - often mixed line endings, "
+            "or a stray quote in an unquoted field.")
+    if shell:
+        return what + "\n  run  set strict-csv off  and load it again."
+    return what + ("\n  retry with  --no-strict-csv  to read it anyway "
+                   "(rows that don't fit the header lose the overflow).")
+
+
 def temp_dir_of(con) -> str:
     try:
         td = con.execute("SELECT current_setting('temp_directory')").fetchone()[0]

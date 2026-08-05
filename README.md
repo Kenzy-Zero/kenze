@@ -179,7 +179,8 @@ kenze.profile("big.parquet")
 - `--memory-limit 8` — pin the RAM budget (GB) for reproducible / SLA runs (great for shared CI/Airflow nodes).
 - `--temp-dir D:/spill` — put disk-spill where there's room.
 - `--threads N` — cap how many CPU threads DuckDB uses.
-- `--skip-bad-lines` — ignore malformed rows in a dirty CSV.
+- `--skip-bad-lines` — ignore malformed rows in a dirty CSV (the row is dropped, not repaired).
+- `--no-strict-csv` — open a CSV that breaks the standard: mixed line endings, a stray quote. Spark output does this a lot, and `--skip-bad-lines` can't help — the parser fails before there's a row to skip.
 - `--skip N` — skip N preamble rows before the CSV header (comment banners, blank lines).
 - `--log run.json` — write a run manifest (inputs, rows, timing).
 - `--no-history` — don't record this run in `~/.kenze/history.jsonl`.

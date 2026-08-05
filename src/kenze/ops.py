@@ -15,7 +15,15 @@ import sys
 import tempfile
 import time
 
-from .engine import connect, ensure_remote, is_remote, load_extension, sql_path, temp_dir_of
+from .engine import (
+    connect,
+    ensure_remote,
+    is_remote,
+    is_strict_csv_error,
+    load_extension,
+    sql_path,
+    temp_dir_of,
+)
 
 LAT_NAMES = {"lat", "latitude"}
 LON_NAMES = {"lon", "lng", "long", "longitude"}
@@ -33,16 +41,17 @@ def _is_glob(path) -> bool:
 
 
 def _source(path: str, skip_bad: bool = False, fmt: str = None,
-            errors: bool = False, skip: int = 0) -> str:
+            errors: bool = False, skip: int = 0, strict: bool = True) -> str:
     """A FROM-able source for a path.
 
     DuckDB auto-detects csv / parquet / json (and .gz) by extension; .xlsx / .xls
     are read via read_xlsx (the caller loads the excel extension). A `fmt` of
     'delta' or 'iceberg' reads a lakehouse table (extension loaded by the caller).
     `skip_bad` ignores malformed CSV rows; `errors` also quarantines them; `skip`
-    drops N preamble rows before the header. When the path is a glob
-    (sales_*.csv), union_by_name aligns columns across files so a schema mismatch
-    between files doesn't crash the run.
+    drops N preamble rows before the header; `strict=False` accepts a CSV that
+    breaks the standard outright. When the path is a glob (sales_*.csv),
+    union_by_name aligns columns across files so a schema mismatch between files
+    doesn't crash the run.
     """
     p = "'" + sql_path(path) + "'"
     if fmt in ("delta", "deltalake"):
@@ -86,19 +95,27 @@ def _source(path: str, skip_bad: bool = False, fmt: str = None,
 
     is_csvish = e in ("", ".csv", ".tsv", ".txt", ".gz")
 
-    if is_csvish and (errors or skip_bad or glob or skip):
+    if is_csvish and (errors or skip_bad or glob or skip or not strict):
         opts = ["auto_detect=true"]
         if glob:
             opts.append("union_by_name=true")
         if skip:
-            # messy exports often have comment/blank preamble lines that trip the
-            # strict CSV sniffer even after skipping - relax it for skip mode.
             opts.append(f"skip={int(skip)}")
-            opts.append("strict_mode=false")
         if errors:
             opts += ["ignore_errors=true", "store_rejects=true", f"rejects_table='{REJECTS_TABLE}'"]
         elif skip_bad:
             opts.append("ignore_errors=true")
+        # Relaxing the CSV standard is deliberately its OWN switch, never a side
+        # effect of --skip-bad-lines, because the two do opposite things to a bad
+        # row: ignore_errors DROPS one it can't parse (and --errors hands it to
+        # you), while strict_mode=false ACCEPTS it and silently discards the part
+        # that didn't fit - a ragged `2,b,EXTRA` arrives as `2,b` with no warning
+        # anywhere and an empty quarantine file. Fusing them would make a broken
+        # file look clean, which is the one answer kenze must never give.
+        # `skip` keeps its own relaxation: preamble junk trips the sniffer even
+        # after the rows are skipped, so it has always been part of that flag.
+        if not strict or skip:
+            opts.append("strict_mode=false")
         return f"read_csv({p}, {', '.join(opts)})"
     if glob and e in (".parquet", ".pq"):
         return f"read_parquet({p}, union_by_name=true)"
@@ -375,7 +392,7 @@ def _clipout_expr(con, q, col, method):
 def build_query(con, spec) -> str:
     src = _source(spec["input"], skip_bad=spec.get("skip_bad_lines"),
                   fmt=spec.get("source_format"), errors=bool(spec.get("errors")),
-                  skip=spec.get("skip") or 0)
+                  skip=spec.get("skip") or 0, strict=spec.get("strict_csv", True))
     cols = columns(con, src)
 
     # base projection
@@ -898,7 +915,8 @@ def run_spec(spec, con=None, quiet=False, disk_check=True, log=None, dry_run=Fal
             print(f"  done: {n:,} rows -> {out}  ({secs:,.1f}s){extra}")
         if log:
             in_src = _source(spec["input"], skip_bad=spec.get("skip_bad_lines"),
-                             fmt=spec.get("source_format"), errors=bool(spec.get("errors")))
+                             fmt=spec.get("source_format"), errors=bool(spec.get("errors")),
+                             strict=spec.get("strict_csv", True))
             _write_log(log, {
                 "tool": "kenze", "action": "run", "input": spec.get("input"),
                 "output": out, "rows": n, "bad_rows": nbad, "seconds": round(secs, 3),
@@ -924,15 +942,20 @@ def _tty():
 
 
 # --------------------------------------------------------------- inspect ops
+#
+# The read-only ops all take skip_bad for the same reason: a file you can't
+# open is exactly the file you most need to look at, so every flag that makes a
+# messy CSV readable has to reach the commands you'd reach for first.
 
-def profile(path, con=None, fmt=None, skip=0) -> int:
+
+def profile(path, con=None, fmt=None, skip=0, skip_bad=False, strict=True) -> int:
     own = con is None
     con = con or connect()
     try:
         ensure_remote(con, path)
         ensure_read(con, path)
         _load_source_ext(con, fmt)
-        src = _source(path, fmt=fmt, skip=skip)
+        src = _source(path, fmt=fmt, skip=skip, skip_bad=skip_bad, strict=strict)
         schema = con.execute(f"DESCRIBE SELECT * FROM {src}").fetchall()
         n = con.execute(f"SELECT count(*) FROM {src}").fetchone()[0]
         size = os.path.getsize(path) if (not is_remote(path) and os.path.isfile(path)) else 0
@@ -947,7 +970,7 @@ def profile(path, con=None, fmt=None, skip=0) -> int:
             con.close()
 
 
-def stats(path, con=None, fmt=None, skip=0):
+def stats(path, con=None, fmt=None, skip=0, skip_bad=False, strict=True):
     """Per-column summary (min/max/nulls/approx-unique) via DuckDB SUMMARIZE."""
     own = con is None
     con = con or connect()
@@ -955,7 +978,7 @@ def stats(path, con=None, fmt=None, skip=0):
         ensure_remote(con, path)
         ensure_read(con, path)
         _load_source_ext(con, fmt)
-        src = _source(path, fmt=fmt, skip=skip)
+        src = _source(path, fmt=fmt, skip=skip, skip_bad=skip_bad, strict=strict)
         rows = con.execute(f"SUMMARIZE SELECT * FROM {src}").fetchall()
         cols = [d[0] for d in con.description]
         show = [c for c in ("column_name", "column_type", "min", "max", "approx_unique", "null_percentage") if c in cols]
@@ -977,7 +1000,7 @@ def _s(v):
     return "" if v is None else str(v)
 
 
-def peek(path, n=20, con=None, fmt=None, skip=0):
+def peek(path, n=20, con=None, fmt=None, skip=0, skip_bad=False, strict=True):
     """A quick, zero-dependency look: first N rows as an aligned table,
     plus each column's type and null count (over the sample)."""
     own = con is None
@@ -986,7 +1009,7 @@ def peek(path, n=20, con=None, fmt=None, skip=0):
         ensure_remote(con, path)
         ensure_read(con, path)
         _load_source_ext(con, fmt)
-        src = _source(path, fmt=fmt, skip=skip)
+        src = _source(path, fmt=fmt, skip=skip, skip_bad=skip_bad, strict=strict)
         schema = con.execute(f"DESCRIBE SELECT * FROM {src}").fetchall()
         names = [r[0] for r in schema]
         types = {r[0]: r[1] for r in schema}
@@ -1021,26 +1044,49 @@ def _clip(s, w):
     return s if len(s) <= w else s[: max(0, w - 1)] + "."
 
 
-def check(path, con=None) -> int:
+def check(path, con=None, skip=0) -> int:
     """Pre-flight integrity scan: is the file readable, how many rows, and how
-    many rows would be rejected as malformed? Returns the reject count."""
+    many rows would be rejected as malformed? Returns the reject count.
+
+    The lenient count comes first and deliberately relaxes strict mode: the
+    file most worth checking is the one that won't open, so the scan has to
+    outlive the damage it is reporting.
+    """
     own = con is None
     con = con or connect()
     try:
         ensure_remote(con, path)
         ensure_read(con, path)
-        p = _source(path)
+        p = _source(path, skip=skip)
         if _ext(path) in ("", ".csv", ".tsv", ".txt", ".gz"):
-            good = con.execute(
-                f"SELECT count(*) FROM read_csv({p}, ignore_errors=true, auto_detect=true)"
-            ).fetchone()[0]
+            try:
+                good = con.execute(
+                    f"SELECT count(*) FROM {_source(path, skip=skip, skip_bad=True)}"
+                ).fetchone()[0]
+                relaxed = False
+            except Exception as e:
+                if not is_strict_csv_error(e):
+                    raise
+                # the file breaks the standard, so even the lenient count needs
+                # the relaxed parser. Say so in the verdict rather than quietly
+                # printing a number the plain command could never reproduce.
+                good = con.execute(
+                    f"SELECT count(*) FROM {_source(path, skip=skip, strict=False)}"
+                ).fetchone()[0]
+                relaxed = True
             try:
                 total = con.execute(f"SELECT count(*) FROM {p}").fetchone()[0]
                 bad = max(0, total - good)
                 verdict = "OK" if bad == 0 else f"{bad:,} malformed row(s) - clean with --skip-bad-lines"
-            except Exception:
+            except Exception as e:
+                # a strict read that dies in the parser is a different diagnosis
+                # from one that merely found bad rows: the FILE breaks the CSV
+                # standard, so no row count is possible without relaxing it.
                 bad = -1
-                verdict = "readable with --skip-bad-lines (strict read failed)"
+                verdict = ("not RFC 4180 compliant (often mixed line endings or a stray "
+                           "quote) - read it with --no-strict-csv"
+                           if relaxed or is_strict_csv_error(e) else
+                           "readable with --skip-bad-lines (strict read failed)")
             print(f"\n  {os.path.basename(path)}: {good:,} readable rows | {verdict}\n")
             return bad
         n = con.execute(f"SELECT count(*) FROM {p}").fetchone()[0]
@@ -1051,7 +1097,7 @@ def check(path, con=None) -> int:
             con.close()
 
 
-def validate(path, schema_path, con=None) -> int:
+def validate(path, schema_path, con=None, skip=0, skip_bad=False, strict=True) -> int:
     """Check a file against a target schema JSON:
         {"columns": {"id": "VARCHAR", "amount": "DOUBLE"}, "not_null": ["id"]}
     Prints problems and returns the number of problems (0 = valid)."""
@@ -1064,7 +1110,7 @@ def validate(path, schema_path, con=None) -> int:
         not_null = [c for c in schema.get("not_null", [])]
 
         ensure_remote(con, path)
-        src = _source(path)
+        src = _source(path, skip=skip, skip_bad=skip_bad, strict=strict)
         desc = con.execute(f"DESCRIBE SELECT * FROM {src}").fetchall()
         have = {r[0].lower(): (r[0], str(r[1]).upper()) for r in desc}
 
@@ -1175,7 +1221,8 @@ def _print_bars(title, data, width=48):
     print()
 
 
-def plot(path, column, by=None, agg=None, bins=20, top=20, width=48, con=None, fmt=None):
+def plot(path, column, by=None, agg=None, bins=20, top=20, width=48, con=None, fmt=None,
+         skip=0, skip_bad=False, strict=True):
     """Draw a quick ASCII chart in the terminal - spot skew / dirty data fast.
 
       plot sales.csv amount              -> histogram (numeric) or top values (text)
@@ -1187,7 +1234,7 @@ def plot(path, column, by=None, agg=None, bins=20, top=20, width=48, con=None, f
         ensure_remote(con, path)
         ensure_read(con, path)
         _load_source_ext(con, fmt)
-        src = _source(path, fmt=fmt)
+        src = _source(path, fmt=fmt, skip=skip, skip_bad=skip_bad, strict=strict)
         return plot_from(con, src, column, by=by, agg=agg, bins=bins, top=top, width=width)
     finally:
         if own:
@@ -1486,7 +1533,7 @@ def run_sql(query, out=None, con=None, quiet=False, disk_check=True):
 
 
 def count(path, by, out=None, distinct=None, top=None, con=None, quiet=False,
-          fmt=None, skip=0, disk_check=True):
+          fmt=None, skip=0, disk_check=True, skip_bad=False, strict=True):
     """No-SQL value-counts / GROUP BY count: how many rows per value(s) of a
     column, biggest first. `top` keeps only the top N groups. `distinct` counts
     unique values of another column per group (e.g. unique users per city)
@@ -1497,7 +1544,7 @@ def count(path, by, out=None, distinct=None, top=None, con=None, quiet=False,
         ensure_read(con, path)
         if fmt:
             _load_source_ext(con, fmt)
-        src = _source(path, fmt=fmt, skip=skip or 0)
+        src = _source(path, fmt=fmt, skip=skip or 0, skip_bad=skip_bad, strict=strict)
         cols = columns(con, src)
         by_list = _aslist(by)
         missing = [c for c in by_list if c not in cols]
