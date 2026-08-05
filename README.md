@@ -73,7 +73,7 @@ progress bar. Everything the CLI can do is in the shell — see **[SHELL.md](htt
 - **Excel in and out** — read and write `.xlsx` workbooks natively (`convert big.parquet -o report.xlsx`), no extra dependency.
 - **GeoJSON in and out** — `convert data.csv -o map.geojson` builds point geometry from lat/lon columns (auto-detected, or `--lat`/`--lon`/`--geom`); `convert map.geojson -o map.csv` flattens geometry back to WKT. Handy for prepping map layers.
 - **Client-ready reports** — `kenze report data.csv -o out.pdf` turns a data file into a styled PDF/HTML report (KPI tiles + a ranked table, auto-fit to your columns); `--per-row` makes one document per row (batch / mail-merge), and `--template`/`--scaffold` let you bring your own HTML. Needs `pip install "kenze[report]"`; PDF renders with your system browser — no heavy install.
-- **Messy CSVs, handled** — `--skip N` drops junk preamble rows; the shell even auto-detects and skips them for you.
+- **Messy CSVs, handled** — `--skip N` drops junk preamble rows (the shell even auto-detects them), `--skip-bad-lines` drops malformed rows, and `--no-strict-csv` opens a file that breaks the CSV standard outright — mixed line endings or a stray quote, which is ordinary Spark output.
 - **Readable recipes** (`.dq` files) that chain steps into one streaming pass, with `${VAR}` templating for scheduled jobs.
 - **Read and write the cloud directly** — `s3://`, `gs://`, `https://` — nothing to download first.
 - **A run ledger** — `history` shows your recent runs (input → output, rows, time).
@@ -217,7 +217,7 @@ tbl = kenze.to_arrow("SELECT city, count(*) FROM 'big.parquet' GROUP BY 1")   # 
 `profile` · `peek` · `stats` · `plot` · `check` · `validate` · `keep` · `drop` · `rename` · `cast` ·
 `fillna` · `mask` · `scale` · `bin` · `encode` · `onehot` · `clip-outliers` · `filter` · `dedup` ·
 `sample` · `head` · `clip` · `convert` · `join` · `diff` · `pivot` · `unpivot` · `split` ·
-`partition` · `traintest` · `count` · `sort` · `report` · `sql` · `eject` · `init` · `run` · `recipe` · `history`
+`partition` · `traintest` · `count` · `sort` · `report` · `sql` · `eject` · `init` · `run` · `recipe` · `history` · `shell`
 
 Run any of these as a one-liner, or run `kenze` and do it all interactively — the
 shell wraps every command above plus session helpers (`open`, `set`, `dryrun`,

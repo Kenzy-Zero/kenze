@@ -11,11 +11,13 @@ kenze is a Python tool (`pip install kenze`) for people who hit `MemoryError` in
 
 ## Key facts
 - Install: `pip install kenze` — one name for the package, the `kenze` command, and `import kenze`.
-- Interactive shell: run `kenze` with no args for a live session (load once, stack steps with live previews, run to a file or save a recipe). Type `/` for a command menu; TAB autocompletes real column names.
-- One-line CLI: 38 commands — keep, drop, filter, rename, cast, fillna, dedup, sample, join, diff, pivot, split, partition, and more.
+- Interactive shell: run `kenze` with no args for a live session (load once, stack steps with live previews, run to a file or save a recipe). Type `/` for a command menu. Autocomplete knows your data, not just your schema: ghost text finishes what you type from the first keystroke (commands, column names, file paths, and the real values in your file), and TAB inside a quoted condition lists a column's actual values with their exact row counts.
+- One-line CLI: 40 commands — keep, drop, filter, rename, cast, fillna, dedup, sample, join, diff, pivot, split, partition, and more.
 - Model-ready: scale, bin, encode, onehot, clip-outliers, and a reproducible traintest split for scikit-learn / XGBoost.
 - Never-OOM: memory is auto-capped and DuckDB spills to disk; full writes stream with a progress bar.
 - Formats: CSV, Parquet, JSON, Excel (.xlsx), plus s3:// / gs:// / https:// cloud paths.
+- Messy CSVs: `--skip N` drops junk preamble rows, `--skip-bad-lines` drops malformed rows, and `--no-strict-csv` opens a file that breaks the CSV standard outright (mixed line endings, a stray quote) - common in Spark output.
+- Schema gate: `kenze validate data.csv --schema schema.json` exits non-zero when a file stops conforming, and `--scaffold` writes that schema from a file you already trust.
 
 ## Links
 - PyPI: https://pypi.org/project/kenze/
