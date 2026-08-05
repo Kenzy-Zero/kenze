@@ -50,6 +50,34 @@ def test_every_command_has_a_next_step_hint():
             f"{name} has no next-step hint (add it to CMD_GUIDE or READY_ON_ENTER)"
 
 
+# --- session settings ----------------------------------------------------------
+
+SETTINGS = ["memory", "threads", "temp", "disk-check", "skip-bad", "strict-csv"]
+
+
+def test_every_setting_is_discoverable():
+    """A setting the shell accepts but never offers is a setting nobody finds.
+
+    0.9.6 regression guard: `set strict-csv off` worked from the day it was
+    written, but was missing from both the autocomplete list and the menu
+    description - so the only way to learn it existed was to read the source.
+    Adding a setting means adding it here too, on purpose.
+    """
+    assert shell.CMD_GUIDE["set"][3] == SETTINGS
+    described = shell.COMMANDS["set"][1]
+    for name in SETTINGS:
+        assert name in described, f"`set` menu text doesn't mention {name}"
+
+
+def test_every_offered_setting_is_actually_handled(capsys):
+    """...and the reverse: nothing is offered that the handler would reject."""
+    st = shell.ShellState()
+    for name in shell.CMD_GUIDE["set"][3]:
+        shell.dispatch(st, f"set {name} off")
+        out = capsys.readouterr().out
+        assert "set what?" not in out, f"`set {name}` is offered but not handled"
+
+
 # --- quote auto-closing (0.9.5) ------------------------------------------------
 # Requested by a user typing text filters in the shell: opening a quote should
 # add the closing one and leave the cursor between them.
