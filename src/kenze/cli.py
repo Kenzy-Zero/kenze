@@ -25,6 +25,7 @@ from .ops import (
     profile,
     run_spec,
     run_sql,
+    scaffold_schema,
     split,
     stats,
     traintest,
@@ -125,7 +126,10 @@ def build_parser():
     sp.add_argument("--distinct", help="count DISTINCT values of this column per group (unique users)")
     sp = cmd("validate", help="check a file against a target schema json")
     sp.add_argument("input")
-    sp.add_argument("--schema", required=True)
+    sp.add_argument("--schema", help="the schema json to check against")
+    sp.add_argument("--scaffold", metavar="PATH",
+                    help="write a schema json describing this file as it is today, "
+                         "then edit it and use it with --schema")
 
     # column ops
     sp = cmd("keep", help="keep only these columns")
@@ -357,7 +361,14 @@ def _inspect(a):
     elif a.cmd == "history":
         history(n=a.n)
     elif a.cmd == "validate":
-        if validate(a.input, a.schema, skip=a.skip or 0, skip_bad=lenient, strict=strict):
+        if a.scaffold:
+            scaffold_schema(a.input, a.scaffold, skip=a.skip or 0, skip_bad=lenient,
+                            strict=strict)
+        elif not a.schema:
+            sys.exit("Error: validate needs --schema <file.json> (what the data should "
+                     "look like).\n  don't have one yet?  kenze validate "
+                     f"{a.input} --scaffold schema.json")
+        elif validate(a.input, a.schema, skip=a.skip or 0, skip_bad=lenient, strict=strict):
             sys.exit(1)
     elif a.cmd == "init":
         init(a.path, input_path=a.init_input)

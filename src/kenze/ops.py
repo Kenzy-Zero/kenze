@@ -1097,6 +1097,81 @@ def check(path, con=None, skip=0) -> int:
             con.close()
 
 
+def _read_schema(schema_path):
+    """Load a schema JSON, or explain what went wrong in terms of what to do.
+
+    The common mistake is passing the DATA file here - `validate` takes the
+    contract, not the thing being checked - and json's own complaint for that
+    ("Expecting value: line 1 column 1") tells you nothing at all.
+    """
+    if not os.path.exists(schema_path):
+        raise ValueError(
+            f"no such schema file: {schema_path}\n"
+            f"  a schema is a small json file describing what the data should look like.\n"
+            f"  write one from a file you already trust:  kenze validate <file> "
+            f"--scaffold {os.path.basename(schema_path) or 'schema.json'}"
+        )
+    try:
+        with open(schema_path, "r", encoding="utf-8") as f:
+            schema = json.load(f)
+    except json.JSONDecodeError as e:
+        looks_like_data = _ext(schema_path) in (
+            ".csv", ".tsv", ".txt", ".parquet", ".pq", ".json", ".ndjson", ".gz",
+            ".xlsx", ".xls", ".geojson")
+        extra = (f"\n  '{os.path.basename(schema_path)}' looks like a DATA file. "
+                 f"--schema takes the contract to check against, not the file being "
+                 f"checked.\n  don't have one yet?  kenze validate "
+                 f"{os.path.basename(schema_path)} --scaffold schema.json"
+                 if looks_like_data else
+                 "\n  expected json like: "
+                 '{"columns": {"id": "BIGINT"}, "not_null": ["id"]}')
+        raise ValueError(f"{schema_path} is not valid json ({e}){extra}") from e
+    if not isinstance(schema, dict):
+        raise ValueError(
+            f"{schema_path} must be a json object, e.g. "
+            f'{{"columns": {{"id": "BIGINT"}}, "not_null": ["id"]}}')
+    return schema
+
+
+def scaffold_schema(path, out, con=None, skip=0, skip_bad=False, strict=True) -> str:
+    """Write the schema JSON that describes `path` as it is today.
+
+    You cannot validate anything until a schema exists, and hand-writing JSON is
+    the friction kenze is meant to remove - so read the file and write the
+    contract it currently satisfies. Every column with no nulls right now is
+    listed as not_null: that is a MEASURED fact about today's file, offered as
+    the starting point you edit, not a claim about what the data means.
+    """
+    own = con is None
+    con = con or connect()
+    try:
+        ensure_remote(con, path)
+        ensure_read(con, path)
+        src = _source(path, skip=skip, skip_bad=skip_bad, strict=strict)
+        desc = con.execute(f"DESCRIBE SELECT * FROM {src}").fetchall()
+        names = [r[0] for r in desc]
+        if not names:
+            raise ValueError(f"no columns found in {path}")
+        nulls = con.execute(
+            "SELECT " + ", ".join(f"count(*) - count({_ident(c)})" for c in names)
+            + f" FROM {src}"
+        ).fetchone()
+        schema = {
+            "columns": {r[0]: str(r[1]).upper() for r in desc},
+            "not_null": [c for c, n in zip(names, nulls) if not n],
+        }
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(schema, f, indent=2)
+            f.write("\n")
+        print(f"\n  wrote {out}  ({len(schema['columns'])} columns, "
+              f"{len(schema['not_null'])} of them with no nulls today)")
+        print(f"  edit it, then:  kenze validate {os.path.basename(path)} --schema {out}\n")
+        return out
+    finally:
+        if own:
+            con.close()
+
+
 def validate(path, schema_path, con=None, skip=0, skip_bad=False, strict=True) -> int:
     """Check a file against a target schema JSON:
         {"columns": {"id": "VARCHAR", "amount": "DOUBLE"}, "not_null": ["id"]}
@@ -1104,8 +1179,7 @@ def validate(path, schema_path, con=None, skip=0, skip_bad=False, strict=True) -
     own = con is None
     con = con or connect()
     try:
-        with open(schema_path, "r", encoding="utf-8") as f:
-            schema = json.load(f)
+        schema = _read_schema(schema_path)
         want = {k.lower(): str(v).upper() for k, v in schema.get("columns", {}).items()}
         not_null = [c for c in schema.get("not_null", [])]
 

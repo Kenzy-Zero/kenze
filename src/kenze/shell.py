@@ -27,6 +27,7 @@ from . import __version__
 from .engine import connect
 from .ops import (
     _clip,
+    _ext,
     _ident,
     _load_source_ext,
     _s,
@@ -42,6 +43,7 @@ from .ops import (
     plot_from,
     run_spec,
     run_sql,
+    scaffold_schema,
     sniff_preamble,
     split,
     traintest,
@@ -116,6 +118,91 @@ COLUMN_CMDS = {"keep", "drop", "filter", "rename", "cast", "fillna", "mask",
                "assert-unique", "assert-not-null"}
 # commands whose first argument is a file path -> path autocomplete
 FILE_CMDS = {"load", "open", "save", "run", "convert", "report"}
+
+# ---- value autocomplete ------------------------------------------------------
+# Offering the real values of a column turns "no SQL required" from a claim about
+# syntax into a claim about knowledge: you no longer have to know what is IN the
+# file either. The guards below exist because the answer has to arrive at typing
+# speed on a file too big to open elsewhere.
+VALUE_MAX_DISTINCT = 500     # above this, a list is noise - say so instead
+VALUE_LIMIT = 40             # most-common values offered, biggest first
+
+# `<column> <operator> '<fragment>` immediately before the cursor. Anchored to
+# the end of the line, so it only fires while you are actually inside the quotes.
+# A bare name, or a double-quoted one - which is how a column with spaces has to
+# be written in the condition anyway, and keeps the command word out of the match.
+_VALUE_CTX = re.compile(
+    r"""(?:"(?P<qcol>[^"]+)"|(?P<pcol>[A-Za-z_][A-Za-z0-9_]*))\s*
+        (?:=|==|!=|<>|\bnot\s+like\b|\blike\b|\bilike\b|\bin\b)\s*
+        \(?\s*
+        '(?P<frag>[^']*)$""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def value_context(text, cols):
+    """Is the cursor inside a quoted value being compared to a known column?
+
+    Returns (column, fragment_typed_so_far) or None. Pure, so the parsing rules
+    are testable without a terminal, a file or a DuckDB connection.
+    """
+    if not cols:
+        return None
+    m = _VALUE_CTX.search(text)
+    if not m:
+        return None
+    frag = m.group("frag")
+    want = (m.group("qcol") or m.group("pcol")).lower()
+    for c in cols:                       # match the real column, case-insensitively
+        if c.lower() == want:
+            return c, frag
+    return None
+
+
+def sql_literal_body(value):
+    """A value as it goes INSIDE an existing pair of single quotes.
+
+    The completion lands between quotes the shell already typed, so only the
+    embedded quotes need doubling - never wrap it again.
+    """
+    return str(value).replace("'", "''")
+
+
+# `<column> [=|==|!=|<>] <value` with NO quote anywhere - the shape a non-SQL
+# user types naturally, and the one _repair_filter already rescues on Enter.
+# Restricted to equality: suggesting a value after `>` would be nonsense.
+_BARE_CTX = re.compile(
+    r"""^\s*(?:"(?P<qcol>[^"]+)"|(?P<pcol>[A-Za-z_][A-Za-z0-9_]*))\s*
+        (?:(?:=|==|!=|<>)\s*)?
+        (?P<frag>[^'"=<>!]*)$""",
+    re.VERBOSE,
+)
+
+
+def bare_value_context(text, cols):
+    """The same question as value_context, for a value typed WITHOUT quotes.
+
+    `filter city = Lon` is not valid SQL, but the shell repairs that shape on
+    Enter (`city = 'Lon'`), so it is a path users really travel - and ghost
+    text that only worked inside quotes would look broken to anyone who typed
+    the natural thing first. Returns (column, fragment) or None.
+    """
+    if not cols:
+        return None
+    parts = text.lstrip().split(None, 1)
+    if len(parts) < 2 or parts[0].lstrip("/").lower() != "filter":
+        return None                      # only filter gets repaired, so only filter suggests
+    m = _BARE_CTX.match(parts[1])
+    if not m:
+        return None
+    frag = m.group("frag")
+    if not frag or frag.strip() != frag.lstrip():
+        return None
+    want = (m.group("qcol") or m.group("pcol")).lower()
+    for c in cols:
+        if c.lower() == want:
+            return c, frag
+    return None
 # how a step maps into a recipe spec; the shell folds them in order
 _STEP_KEYS = {
     "keep": "keep", "drop": "drop", "clip": "bbox",
@@ -177,7 +264,7 @@ _COL_METHODS = {
 }
 
 
-def _guide_hint(text, has_input):
+def _guide_hint(text, has_input, cols=None, st=None):
     """What to type next for the current input line. Returns (kind, message):
     kind is 'start'/'flow'/'need'/'ready', message is the guidance text."""
     stripped = text.strip()
@@ -191,6 +278,15 @@ def _guide_hint(text, has_input):
     parts = stripped.split(None, 1)
     cmd = parts[0].lower()
     arg = parts[1].strip() if len(parts) > 1 else ""
+    # sitting on a value: say that TAB will fill it, or - if we have already
+    # looked and there was nothing to show - say why. The feature is worth
+    # nothing if nobody knows to press the key, and worth less than nothing if
+    # pressing it appears to do nothing.
+    if cols and cmd in COLUMN_CMDS:
+        ctx = value_context(text, cols) or bare_value_context(text, cols)
+        if ctx:
+            note = st.cached_note(*ctx) if st is not None else None
+            return ("ready", note or "TAB to see this column's values")
     if cmd in READY_ON_ENTER:
         return ("ready", "press Enter to run")
     g = CMD_GUIDE.get(cmd)
@@ -239,6 +335,9 @@ _STYLE_DICT = {
     "bottom-toolbar": "bg:#f0b429 #101010",
     "tb-key": "bg:#f0b429 #101010 bold",
     "tb-dim": "bg:#f0b429 #6b5200",
+    # ghost text: the rest of a value, shown ahead of the cursor. Dim enough to
+    # read as "not typed yet" against the gold theme, not so dim it's invisible.
+    "auto-suggestion": "#6b6b6b",
 }
 
 # set up once when the pretty shell starts (see run_shell)
@@ -292,6 +391,9 @@ class ShellState:
     def __init__(self):
         self.input = None
         self.cols = []           # current (post-transform) columns, for autocomplete
+        self._value_cache = {}   # (column, query, prefix) -> (rows, note) for autocomplete
+        self._query_key = None   # memo for current_query (see there)
+        self._query_sql = None
         self.steps = []          # ordered [(cmd, arg), ...]
         self.auto_preview = True
         # session settings (mirrors the CLI global flags)
@@ -408,7 +510,17 @@ class ShellState:
         return spec
 
     def current_query(self):
-        return build_query(self.con, self.build_spec())
+        """The SQL for the pipeline as it stands.
+
+        Memoised on the spec, because ghost text asks for this on the keystroke
+        path and building it runs a DESCRIBE - which on a large remote CSV means
+        re-sniffing the file over the network for every character typed.
+        """
+        spec = self.build_spec()
+        key = repr(sorted(spec.items(), key=lambda kv: kv[0]))
+        if key != self._query_key:
+            self._query_key, self._query_sql = key, build_query(self.con, spec)
+        return self._query_sql
 
     def refresh_cols(self):
         try:
@@ -416,6 +528,87 @@ class ShellState:
                 self.cols = columns(self.con, f"({self.current_query()})")
         except Exception:
             pass  # keep the old columns if a half-typed step doesn't build
+
+    def column_values(self, col, prefix=""):
+        """The real values of `col`, most common first - or why there are none.
+
+        Returns (rows, note): rows is a list of (value, count), note is a
+        sentence about what was measured (or None when the list is complete).
+        Never guesses and never samples: a count shown next to a value is the
+        true count.
+
+        A column with more distinct values than we would ever show is not
+        refused outright - it just needs a starting letter first. `user_id`
+        with four million values is useless as a list and perfectly useful as
+        "the ones beginning with u", which is how you would look for it anyway.
+
+        Cached per (column, pipeline, prefix), because the pipeline is part of
+        the answer - after `filter city = 'London'` the values of `district`
+        are a different set, and a stale list would be a confident lie.
+        """
+        try:
+            query = self.current_query()
+        except Exception:
+            return [], None
+        prefix = prefix or ""
+        key = (col, query, prefix.lower())
+        if key in self._value_cache:
+            return self._value_cache[key]
+
+        # a shorter prefix we already fetched IN FULL contains every answer for
+        # this longer one, so refine in memory rather than scanning again -
+        # otherwise every keystroke would be another pass over the column.
+        for i in range(len(prefix) - 1, -1, -1):
+            shorter = self._value_cache.get((col, query, prefix[:i].lower()))
+            if shorter and shorter[1] is None:
+                low = prefix.lower()
+                out = ([(v, n) for v, n in shorter[0] if str(v).lower().startswith(low)],
+                       None)
+                self._value_cache[key] = out
+                return out
+
+        ident = '"' + col.replace('"', '""') + '"'
+        try:
+            # cardinality first: cheap, and it decides whether a plain list is
+            # useful at all. approx_count_distinct is an estimate, so it is only
+            # ever used to make this yes/no call - never shown as a fact.
+            n = self.con.execute(
+                f"SELECT approx_count_distinct({ident}) FROM ({query}) _v"
+            ).fetchone()[0] or 0
+            where = f"{ident} IS NOT NULL"
+            note = None
+            if n > VALUE_MAX_DISTINCT:
+                if not prefix:
+                    out = ([], f"~{n:,} distinct values - type a letter to narrow them")
+                    self._value_cache[key] = out
+                    return out
+                lit = "'" + prefix.replace("'", "''") + "'"
+                where += f" AND starts_with(lower(CAST({ident} AS VARCHAR)), lower({lit}))"
+                note = f"~{n:,} distinct values - showing the top matches for '{prefix}'"
+            rows = self.con.execute(
+                f"SELECT {ident} AS v, count(*) AS n FROM ({query}) _v "
+                f"WHERE {where} GROUP BY 1 "
+                f"ORDER BY n DESC, v LIMIT {int(VALUE_LIMIT)}"
+            ).fetchall()
+            out = ([(r[0], r[1]) for r in rows], note)
+        except Exception:
+            # a half-typed pipeline, an unreadable column, a cancelled scan:
+            # a completer must never take the prompt down with it
+            return [], None
+        self._value_cache[key] = out
+        return out
+
+    def cached_note(self, col, prefix=""):
+        """The note for a lookup we have ALREADY done, without doing one.
+
+        The bottom toolbar redraws on every keystroke, so it may only ever read
+        the cache - never trigger a scan of its own.
+        """
+        try:
+            got = self._value_cache.get((col, self.current_query(), (prefix or "").lower()))
+        except Exception:
+            return None
+        return got[1] if got else None
 
 
 # ------------------------------------------------------------- handlers
@@ -977,12 +1170,57 @@ def h_check(st, arg):
     check(path, con=st.con)
 
 
+_DATA_EXTS = (".csv", ".tsv", ".txt", ".parquet", ".pq", ".json", ".ndjson",
+              ".gz", ".xlsx", ".xls", ".geojson")
+# .json is deliberately NOT in that list: it is the schema's own format. A
+# .json that turns out to be data gets caught downstream, where the parse
+# failure can say so precisely.
+_DATA_EXTS = tuple(e for e in _DATA_EXTS if e not in (".json", ".ndjson"))
+
+
 def h_validate(st, arg):
     a = _split_args(arg)
+
+    # accept the CLI spellings too - somebody who read the docs types
+    # `validate --schema s.json`, and being pedantic about it helps nobody
+    scaffold = None
+    cleaned = []
+    i = 0
+    while i < len(a):
+        tok = a[i]
+        if tok in ("--schema", "-s") and i + 1 < len(a):
+            cleaned.insert(0, a[i + 1])
+            i += 2
+        elif tok == "--scaffold" and i + 1 < len(a):
+            scaffold, i = a[i + 1], i + 2
+        else:
+            cleaned.append(tok)
+            i += 1
+    a = cleaned
+
+    if scaffold:
+        path = a[0] if a else st.input
+        if not path:
+            _say("  no file loaded - load one first, or: validate <file> --scaffold s.json", "warn")
+            return
+        scaffold_schema(path, scaffold, con=st.con)
+        return
+
     if not a:
         _say("  usage: validate <schema.json> [file]   (file defaults to the loaded one)", "warn")
+        if st.input:
+            _say("  no schema yet? write one from what's loaded:  "
+                 "validate --scaffold schema.json", "dim")
         return
+
     schema = a[0]
+    # the easy mistake: passing the DATA file, which is already loaded anyway
+    same_as_loaded = bool(st.input) and os.path.basename(schema) == os.path.basename(st.input)
+    if len(a) == 1 and (same_as_loaded or _ext(schema) in _DATA_EXTS):
+        _say(f"  validate takes the SCHEMA here, not the data file - "
+             f"{os.path.basename(schema)} is already what gets checked.", "warn")
+        _say("  no schema yet?  validate --scaffold schema.json", "dim")
+        return
     path = a[1] if len(a) > 1 else st.input
     if not path:
         _say("  no file loaded - pass one: validate <schema.json> <file>", "warn")
@@ -1407,6 +1645,162 @@ def _basic_repl(st):
     return 0
 
 
+def _finish(frag, options):
+    """The tail of the first option that starts with `frag`, or None.
+
+    Order is the caller's, deliberately: the ghost text and the TAB menu walk
+    the same list, so the suggestion is always what TAB would have given you.
+    Nothing is suggested for an empty fragment - there is no word to finish yet.
+    """
+    if not frag:
+        return None
+    low = frag.lower()
+    for opt in options:
+        s = str(opt)
+        if s.lower().startswith(low) and len(s) > len(frag):
+            return s[len(frag):]
+    return None
+
+
+def _text_values(st, col, frag):
+    """Values eligible for GHOST TEXT - text only, never numbers.
+
+    A half-typed word is obviously unfinished: `L` is not a city, so completing
+    it to `London` can only help. A number is not like that. `id = 1` is
+    already complete and valid, and quietly extending it to `10` changes what
+    the user asked for while looking like it merely finished it. TAB still
+    lists numeric values, because there you see what you are choosing.
+    """
+    rows, _note = st.column_values(col, frag)
+    return [v for v, _ in rows if isinstance(v, str)]
+
+
+def suggest_for(st, text):
+    """Ghost text for the line typed so far, or None. Pure enough to test.
+
+    Finishes whatever you are actually typing - a command, a column, a setting,
+    a path, or a value - so the shell suggests from the very first keystroke
+    rather than only once you reach a quoted value.
+    """
+    stripped = text.lstrip()
+    if not stripped:
+        return None
+
+    # the command itself (first token)
+    if " " not in stripped:
+        base = stripped[1:] if stripped.startswith("/") else stripped
+        return _finish(base, COMMANDS)
+
+    cmd = stripped.split(None, 1)[0].lstrip("/").lower()
+    rest = stripped.split(None, 1)[1] if len(stripped.split(None, 1)) > 1 else ""
+
+    # a value, quoted or not - the only branch that reads the file, and the
+    # reason the whole suggester runs on a background thread
+    ctx = value_context(text, st.cols)
+    if ctx:
+        col, frag = ctx
+        tail = _finish(frag, _text_values(st, col, frag))
+        return sql_literal_body(tail) if tail else None
+    bare = bare_value_context(text, st.cols)
+    if bare:
+        col, frag = bare
+        # no escaping here: the value is going in unquoted and _repair_filter
+        # quotes the whole thing on Enter
+        return _finish(frag, _text_values(st, col, frag))
+
+    # `filter city ` - the column is named and the next thing needed is an
+    # operator. Nobody guesses "=" from a blank prompt, so offer it: this is
+    # the one place a suggestion on empty input teaches rather than presumes.
+    if cmd == "filter" and text.endswith(" ") and st.cols:
+        words = rest.split()
+        if len(words) == 1 and any(c.lower() == words[0].strip('"').lower() for c in st.cols):
+            return "= "
+
+    if text.endswith((" ", "\t")):     # nothing half-typed to finish
+        return None
+    cur = text.split()[-1]
+
+    if cmd in FILE_CMDS:
+        return _finish_path(rest)
+    if cmd == "set":
+        return _finish(cur, CMD_GUIDE["set"][3])
+    if cmd in _COL_METHODS and ":" in cur:
+        return _finish(cur.rsplit(":", 1)[-1], _COL_METHODS[cmd])
+    if cmd in COLUMN_CMDS and st.cols:
+        return _finish(cur.rsplit(",", 1)[-1], st.cols)
+    return None
+
+
+def _finish_path(frag):
+    """The rest of a file name being typed. One directory listing, no walk."""
+    frag = frag.strip().strip("'\"")
+    if not frag:
+        return None
+    folder, _, leaf = frag.replace("\\", "/").rpartition("/")
+    if not leaf:
+        return None
+    try:
+        names = sorted(os.listdir(folder or "."))
+    except OSError:
+        return None
+    return _finish(leaf, names)
+
+
+def _keep_suggesting_on_delete(buf):
+    """Keep the ghost text alive when you backspace.
+
+    prompt_toolkit only asks the suggester after text is INSERTED, and any edit
+    clears the current suggestion - so deleting a character left the line blank
+    of ghost text until you typed a new one. Backspacing is how you correct a
+    wrong guess, which is exactly when you most want the suggestion back, so
+    re-ask whenever the line got shorter.
+    """
+    state = {"len": len(buf.text)}
+
+    def on_change(b):
+        n = len(b.text)
+        shrank = n < state["len"]
+        state["len"] = n
+        if not (shrank and b.auto_suggest):
+            return
+        try:
+            from prompt_toolkit.application.current import get_app
+            get_app().create_background_task(b._async_suggester())
+        except Exception:
+            pass          # no running app, or a prompt_toolkit that renamed it
+
+    buf.on_text_changed += on_change
+    return on_change
+
+
+def make_suggester(st):
+    """Ghost text: the rest of what you are typing, dim ahead of the cursor,
+    accepted with the right-arrow.
+
+    This is prompt_toolkit's AutoSuggest, a different mechanism from the
+    completer below and an answer to a different question. The completer, on
+    TAB, answers "what are my options?" - a menu, with row counts on values.
+    This answers "what am I typing?" as you type, with no key pressed and
+    nothing to read.
+
+    It runs on every keystroke, so it must never be the thing that blocks on
+    DuckDB. The caller wraps it in ThreadedAutoSuggest, so the one column scan
+    it can trigger happens off the event loop and the prompt keeps taking keys
+    while it runs; every keystroke after that is a lookup in the cache.
+    """
+    from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
+
+    class KenzeSuggester(AutoSuggest):
+        def get_suggestion(self, buffer, document):
+            try:
+                tail = suggest_for(st, document.text_before_cursor)
+            except Exception:
+                return None       # a suggester that raises kills the prompt
+            return Suggestion(tail) if tail else None
+
+    return KenzeSuggester()
+
+
 def make_completer(st):
     """The / command palette + schema-aware column + file-path autocomplete.
 
@@ -1456,6 +1850,31 @@ def make_completer(st):
                 for c in paths.get_completions(sub, complete_event):
                     yield c
                 return
+            # inside quotes on a known column -> offer the column's real values.
+            # Gated on completion_requested (an explicit TAB), never on typing:
+            # this one asks DuckDB a question, and doing that per keystroke on a
+            # 60M-row file would lock the prompt and feel broken, not magic.
+            if cmd in COLUMN_CMDS and complete_event.completion_requested:
+                ctx = value_context(text, st.cols) or bare_value_context(text, st.cols)
+                if ctx:
+                    col, frag = ctx
+                    rows, _note = st.column_values(col, frag)
+                    low = frag.lower()
+                    quoted = value_context(text, st.cols) is not None
+                    for v, n in rows:
+                        if not str(v).lower().startswith(low):
+                            continue
+                        yield Completion(sql_literal_body(v) if quoted else str(v),
+                                         start_position=-len(frag),
+                                         display=str(v),
+                                         display_meta=f"{n:,} rows")
+                    # when there is nothing to offer, the reason goes to the
+                    # bottom toolbar (see _guide_hint). It cannot be a
+                    # Completion: TAB applies the top one, so a note here would
+                    # be inserted and vanish - which is what "nothing came up"
+                    # looked like.
+                    return
+
             cur = text.split()[-1] if not text.endswith((" ", "\t")) else ""
             if cmd in _COL_METHODS and ":" in cur:    # method/type after a colon
                 frag = cur.rsplit(":", 1)[-1]
@@ -1556,6 +1975,29 @@ def _make_keys():
     # other case falls through to prompt_toolkit's own bindings untouched.
     from prompt_toolkit.filters import Condition, has_selection
 
+    @Condition
+    def _suggestion_behind_a_quote():
+        """Ghost text is showing and the cursor sits just inside the quote pair.
+
+        prompt_toolkit only accepts a suggestion when the cursor is at the very
+        end of the line - but the auto-closing quote from 0.9.5 always leaves
+        one character after it, so the two features cancelled each other out:
+        the ghost text appeared and the right-arrow stepped over the quote
+        instead of taking it. This puts the two back on speaking terms.
+        """
+        try:
+            from prompt_toolkit.application.current import get_app
+            b = get_app().current_buffer
+        except Exception:
+            return False
+        s = b.suggestion
+        return bool(s and s.text and b.document.text_after_cursor in ("'", '"'))
+
+    @kb.add("right", filter=~has_selection & _suggestion_behind_a_quote)
+    @kb.add("c-e", filter=~has_selection & _suggestion_behind_a_quote)
+    def _(event):  # noqa: F811
+        event.current_buffer.insert_text(event.current_buffer.suggestion.text)
+
     def _quote_key(ch):
         def handler(event):
             b = event.current_buffer
@@ -1601,7 +2043,7 @@ def _pretty_repl(st):
             typed = get_app().current_buffer.text
         except Exception:
             typed = ""
-        hint = _guide_hint(typed, bool(st.input))
+        hint = _guide_hint(typed, bool(st.input), st.cols, st)
         left = []
         if hint:
             kind, msg = hint
@@ -1620,17 +2062,22 @@ def _pretty_repl(st):
         ]
         return FormattedText(left + right)
 
+    from prompt_toolkit.auto_suggest import ThreadedAutoSuggest
+
     prompt_msg = FormattedText([("class:brand", "kenze"), ("class:arrow", " > ")])
     session = PromptSession(
         message=prompt_msg,
         completer=make_completer(st),
         complete_style=CompleteStyle.COLUMN,
         complete_while_typing=True,
+        # threaded so the one scan it can trigger never blocks the prompt
+        auto_suggest=ThreadedAutoSuggest(make_suggester(st)),
         key_bindings=_make_keys(),
         history=InMemoryHistory(),
         bottom_toolbar=toolbar,
         style=_STYLE,
     )
+    _keep_suggesting_on_delete(session.default_buffer)
     while True:
         try:
             line = session.prompt()

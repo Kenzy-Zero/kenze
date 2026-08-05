@@ -216,6 +216,8 @@ fill in what it asks for, and press Enter.
 ## Autocomplete and keys
 
 - Type `/` to open the command menu; keep typing to filter it (`/fi` -> filter).
+- **Ghost text** finishes what you are typing as you type it — see below;
+  right-arrow accepts.
 - Typing a column argument suggests the file's real column names; **TAB** autofills.
 - TAB also completes options: `run`/`convert` keywords, `set` settings, and the
   type/method after a colon (`cast id:VARCHAR`, `scale x:zscore`).
@@ -231,6 +233,75 @@ fill in what it asks for, and press Enter.
   same way, which is how paths with spaces get typed: `load "Feb 10.csv"`.
   An apostrophe inside a word (`don't`) is left alone.
 - **Ctrl-C** clears the current line; **Ctrl-D** (or `exit`) leaves.
+
+### Ghost text
+
+From the very first keystroke, kenze shows the rest of what you are typing in
+dim text ahead of the cursor. Press the **right-arrow** (or Ctrl-E) to take it,
+or just keep typing to ignore it:
+
+    kenze > f                 -> f`ilter`
+    kenze > filter ci         -> filter ci`ty`
+    kenze > load data/sal     -> load data/sal`es_2026.csv`
+    kenze > set str           -> set str`ict-csv`
+    kenze > filter city = 'L  -> filter city = 'L`ondon`
+
+Commands, your file's column names, settings, file paths and — the interesting
+one — **the real values in your data**. It keeps up as you **backspace**, so
+correcting a wrong guess does not leave you staring at a bare line.
+
+It also works before you have typed the quotes: `filter city = Lon` suggests
+`don`, because the shell repairs that shape into valid SQL on Enter anyway. And
+when you have named a column but not yet a comparison, `filter city ` offers
+`= ` — nobody guesses the operator from a blank prompt.
+
+Two things it deliberately will **not** do:
+
+- **It never finishes a number.** `L` is obviously an unfinished word, so
+  completing it to `London` can only help. `id = 1` is already complete and
+  valid, and quietly extending it to `10` would change what you asked for while
+  looking like it merely finished it. TAB still lists numeric values, because
+  there you can see what you are choosing.
+- **It says nothing until you have typed a character** (bar the operator case
+  above): with an empty value there is no word to finish, and proposing the most
+  common one unasked would be putting words in your mouth.
+
+### Value autocomplete
+
+Values are the part kenze has to read your file to know. That happens two ways,
+and they answer different questions: ghost text above answers *"what am I
+typing?"*, and TAB answers *"what are my options?"* —
+**with the true row count beside each value**, most common first:
+
+    kenze > filter city = '<TAB>
+                            +--------------------------+
+                            | London          600 rows |
+                            | Paris           300 rows |
+                            | Tokyo           100 rows |
+                            +--------------------------+
+
+You no longer have to know what is *in* the file to filter on it. A value
+containing an apostrophe is escaped for you either way, so what you end up with
+is always valid.
+
+Three things worth knowing, because each is a deliberate choice:
+
+- **The column is read once, on a background thread.** Reading it is a real
+  query, so it never runs on the keystroke path: the first suggestion may take a
+  moment to appear on a very large file while the prompt keeps taking keys, and
+  every one after it is instant.
+- **The values follow your pipeline, not the file.** After `filter country =
+  'FR'`, the values offered for `city` are the ones that survive that step —
+  because anything else would be a confident lie about data you have changed.
+- **A high-cardinality column asks for a letter rather than refusing.** An id
+  column with four million values is useless as a list and perfectly useful as
+  "the ones starting with `u`" — which is how you would look for it anyway. With
+  nothing typed, the toolbar tells you what it measured (`~4,182,443 distinct
+  values - type a letter to narrow them`); type one and it answers for real,
+  refining as you keep going.
+
+The counts are exact. The only estimate involved is the distinct-count used to
+decide how to respond, and it is never shown as a fact.
 
 ---
 

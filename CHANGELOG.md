@@ -4,6 +4,123 @@ All notable changes to kenze are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] - 2026-08-05
+
+### Added
+- **Ghost text in the shell.** From the first keystroke, the rest of what you are
+  typing appears in dim text ahead of the cursor; the right-arrow (or Ctrl-E)
+  takes it, and typing straight past ignores it.
+
+  ```
+  kenze > f                 ->  f`ilter`
+  kenze > filter ci         ->  filter ci`ty`
+  kenze > load data/sal     ->  load data/sal`es_2026.csv`
+  kenze > set str           ->  set str`ict-csv`
+  kenze > filter city = 'L  ->  filter city = 'L`ondon`
+  ```
+
+  Commands, column names, settings, cast types, file paths - and the real values
+  in your data. It also fires before you type the quotes (`filter city = Lon`),
+  because the shell already repairs that shape into valid SQL on Enter, and it
+  is what people type before they learn about the quoting.
+
+- **Value autocomplete.** Values are the part kenze has to read your file to
+  know, and it offers them two ways because they answer different questions.
+  Ghost text answers "what am I typing?"; **TAB** answers "what are my
+  options?", with the **exact row count** beside each value, most common first:
+
+  ```
+  kenze > filter city = '<TAB>    ->  London        600 rows
+                                      Paris         300 rows
+                                      Tokyo         100 rows
+  ```
+
+  This is the point at which "no SQL required" stops being a claim about syntax
+  and becomes a claim about knowledge: you no longer have to know what is *in*
+  the file to filter on it. Works for `=`, `!=`, `<>`, `LIKE`, `ILIKE` and `IN`,
+  on bare or quoted column names, and on the last condition of a compound one. A
+  value containing an apostrophe is escaped for you, so what you end up with is
+  always valid.
+
+  Four deliberate constraints, because a feature like this is only as good as
+  its worst moment:
+  - **The column is read once, on a background thread.** Reading it is a real
+    query, so it never runs on the keystroke path; results are cached and a
+    longer prefix is answered from memory, so only the first suggestion for a
+    column can cost anything and the prompt keeps taking keys while it does.
+  - **The values follow your pipeline, not the file.** After `filter country =
+    'FR'`, the values offered for `city` are the ones that survive that step.
+    Anything else would be a confident lie about data the user has already
+    changed - so the cache is keyed on (column, pipeline, prefix) and a step
+    never serves a stale list.
+  - **A high-cardinality column asks for a letter rather than refusing.** An id
+    column with four million values is useless as a list and perfectly useful as
+    "the ones starting with u", which is how you would look for it anyway. With
+    nothing typed the toolbar says what was measured - `~4,182,443 distinct
+    values - type a letter to narrow them`; with a letter, it answers for real.
+    The counts shown are exact; the only estimate is the distinct-count used to
+    decide how to respond, and it is never presented as a fact.
+  - **Ghost text never finishes a number.** A half-typed word is obviously
+    unfinished, so completing `L` to `London` can only help. `id = 1` is already
+    complete and valid, and quietly extending it to `10` would change what was
+    asked for while looking like it merely finished it. TAB still lists numeric
+    values, because there you can see what you are choosing.
+
+  Ghost text also stays quiet until at least one character is typed - with an
+  empty fragment there is no word to finish - with one exception that teaches
+  rather than presumes: after `filter city ` it offers `= `, because nobody
+  guesses the operator from a blank prompt.
+
+  The bottom toolbar says `TAB to see this column's values` when the cursor is
+  in that position, because a key nobody knows about is a feature nobody has.
+
+- **`validate --scaffold`** — write the schema JSON for a file you already
+  trust, instead of hand-writing it:
+
+  ```
+  kenze validate sales.csv --scaffold schema.json
+  ```
+
+  Every column is recorded with its real type, and every column with no nulls
+  *today* is listed under `not_null` - a measured fact about this file, offered
+  as a starting point to edit rather than a claim about what the data means.
+  You could not use `validate` at all without a schema, and writing JSON by hand
+  is exactly the friction kenze exists to remove.
+
+### Fixed
+- **`validate` now explains the schema argument instead of leaking a JSON
+  parser error.** Handing it the data file - the natural thing to type, and in
+  the shell the loaded file is already what gets checked - produced json's own
+  `Expecting value: line 1 column 1 (char 0)`, which says nothing at all. It now
+  names the mistake, and points at `--scaffold`. A missing schema file, a
+  non-object schema, and omitting `--schema` entirely all say what to do next
+  rather than dumping usage.
+- **The shell's `validate` accepts the CLI spelling.** `validate --schema s.json`
+  works alongside `validate s.json`; somebody who read the docs should not be
+  corrected on punctuation.
+- **Ghost text now survives a backspace.** prompt_toolkit only asks the
+  suggester after text is *inserted*, and any edit clears the current
+  suggestion - so deleting a character left the line bare until you typed a new
+  one. Backspacing is how you correct a wrong guess, which is exactly when the
+  suggestion is most wanted.
+- **The pipeline's SQL is no longer rebuilt on every keystroke.** Building it
+  runs a `DESCRIBE`, which on a large remote CSV means re-sniffing the file over
+  the network; it is now memoised on the pipeline and rebuilt only when a step
+  changes.
+- **The right-arrow now accepts ghost text through a closing quote.**
+  prompt_toolkit only accepts a suggestion when the cursor is at the very end of
+  the line, but the auto-closing quotes added in 0.9.5 always leave a `'` after
+  it - so the two features silently cancelled each other out, the suggestion
+  appearing while the arrow merely stepped over the quote.
+
+### Internal
+- New module `tests/test_value_complete.py` (45 tests), including three that
+  drive a real `PromptSession` over a pipe and press an actual TAB, right-arrow
+  and backspace - because a completer returning the right answer is not the
+  same as the key working.
+- New module `tests/test_validate.py` (13 tests) covering the scaffold round
+  trip and every way the schema argument can be got wrong.
+
 ## [0.9.6] - 2026-08-05
 
 Found by using kenze for real work: a plain Spark-written CSV could not be

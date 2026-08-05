@@ -62,8 +62,11 @@ kenze can be used two ways, over the same engine:
 - **Interactively.** Run `kenze` with no arguments to enter a live shell: load a
   file once, stack steps that preview as you go, then run or save the result.
   Every command below is available in the shell, along with a `/` command menu,
-  column autocomplete, and self-closing quotes (typing `'` gives you the pair with
-  the cursor in the middle). The shell is documented in full in `SHELL.md`.
+  column autocomplete, self-closing quotes (typing `'` gives you the pair with
+  the cursor in the middle), and **value autocomplete** — pressing TAB inside a
+  quoted condition offers the column's real values with their row counts, so you
+  do not have to know what is in the file to filter on it. The shell is
+  documented in full in `SHELL.md`.
 - **As a one-line CLI.** `kenze <command> <input> -o <output>` — ideal for scripts,
   cron, and pipelines. This document is the reference for that form.
 
@@ -322,6 +325,27 @@ The schema file has the form:
 The command reports every column whose type does not match, every required
 column that is absent, and any nulls found in columns listed under `not_null`.
 It exits 0 when the file conforms and 1 when it does not.
+
+You do not have to write that JSON by hand. Point `--scaffold` at a file you
+already trust and kenze writes the contract it currently satisfies:
+
+```
+kenze validate sales.csv --scaffold schema.json
+```
+
+Every column is recorded with its real type, and every column that has no nulls
+*today* is listed under `not_null` — a measured fact about this file, offered as
+a starting point to edit rather than a claim about what the data means. Then use
+it as a gate on everything that follows:
+
+```bash
+kenze validate daily.csv --schema schema.json || exit 1
+kenze filter daily.csv --where "amount > 0" -o clean.csv
+```
+
+In the interactive shell the loaded file is the one being checked, so the
+argument is the schema: `validate schema.json`, or `validate --scaffold
+schema.json` to write one first.
 
 #### count
 

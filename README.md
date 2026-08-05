@@ -30,7 +30,22 @@ One name for everything: `pip install kenze` → the `kenze` command → `import
 Just run `kenze`. You land in a live session: load a file once, stack simple
 steps (each **previews as you go**), then run the pipeline to a file or save it
 as a reusable recipe. Type `/` for a live command menu; **TAB** autocompletes
-your file's real column names.
+your file's real column names — and, inside a quoted condition, its real
+**values**:
+
+```
+kenze > f                       <- ghost text finishes it: f`ilter`
+kenze > filter ci               <- ...and your column names: filter ci`ty`
+kenze > filter city = 'L        <- ...and your actual data: 'L`ondon`
+                                   right-arrow takes it
+
+kenze > filter city = '<TAB>    <- or TAB for the whole list
+                       +------------------------+
+                       | London        600 rows |     <- read from your file,
+                       | Paris         300 rows |        counts are exact
+                       | Tokyo         100 rows |
+                       +------------------------+
+```
 
 ```
 kenze > load sales.parquet          # 60M rows, opens instantly
@@ -49,6 +64,7 @@ progress bar. Everything the CLI can do is in the shell — see **[SHELL.md](htt
 ## Feature highlights
 
 - **An interactive shell** (`kenze`) with a `/` command menu, live previews, schema-aware autocomplete, and data-quality guards — plus the same as a one-line CLI for scripts and cron.
+- **Autocomplete that knows your data, not just your columns** — ghost text finishes what you type from the first keystroke: commands, column names, file paths, and **the real values in your file**. TAB shows every value with its exact row count. It follows the pipeline you have built so far, and refuses to list a column with millions of distinct values, telling you what it measured instead.
 - **Process files bigger than your RAM** without crashing — memory is auto-capped and DuckDB spills to disk.
 - **40 CLI commands** for the everyday work: `keep`, `drop`, `filter`, `rename`, `cast`, `fillna`, `dedup`, `sample`, `count`, `sort`, `join`, `diff`, `pivot`, `split`, `partition`, and more — no SQL needed.
 - **Count & sort with zero SQL** — `kenze count sales.csv city --top 10` is a value-counts / group-by (`--distinct user` for unique users per group); `kenze sort sales.csv --by revenue --desc --top 10` orders and keeps the top N. Both chain in the shell pipeline.
@@ -61,7 +77,7 @@ progress bar. Everything the CLI can do is in the shell — see **[SHELL.md](htt
 - **Readable recipes** (`.dq` files) that chain steps into one streaming pass, with `${VAR}` templating for scheduled jobs.
 - **Read and write the cloud directly** — `s3://`, `gs://`, `https://` — nothing to download first.
 - **A run ledger** — `history` shows your recent runs (input → output, rows, time).
-- **Data-quality guards** (`assert`, `assert_unique`, `assert_not_null`), **PII masking** (`mask`), **schema validation** (`validate`) — a failed check aborts before anything is written.
+- **Data-quality guards** (`assert`, `assert_unique`, `assert_not_null`), **PII masking** (`mask`), **schema validation** (`validate`) — a failed check aborts before anything is written. `kenze validate data.csv --scaffold schema.json` writes the contract for you from a file you already trust, so the gate takes a minute to set up rather than an afternoon of hand-written JSON.
 - **No lock-in** — `eject` any recipe to raw DuckDB SQL or Python.
 - **Use it from Python too** — `import kenze` and call `kenze.sift(...)`, `kenze.sql(...)`.
 - Atomic writes and clean, cross-platform output on any terminal.
